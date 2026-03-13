@@ -1,0 +1,264 @@
+const fs = require('fs');
+const path = require('path');
+
+const receiptTemplates = {
+  F1: path.resolve(__dirname, '..', 'templates', 'boleta.formato1.html'),
+  F2: path.resolve(__dirname, '..', 'templates', 'boleta.formato2.html'),
+};
+
+const templateCache = new Map();
+
+const escapeHtml = (value) =>
+  String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
+const toCurrency = (value) => {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return 'S/ 0.00';
+  return `S/ ${numeric.toFixed(2)}`;
+};
+
+const toPlainAmount = (value) => {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return '0.00';
+  return numeric.toFixed(2);
+};
+
+const toDateParts = (value) => {
+  if (!value) return { date: '-', time: '-' };
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { date: '-', time: '-' };
+
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    date: `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`,
+    time: `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  };
+};
+
+const normalizeReceiptFormat = (value) => {
+  const raw = String(value || '')
+    .trim()
+    .toUpperCase();
+  return raw === 'F1' ? 'F1' : 'F2';
+};
+
+const toWordsBelowHundred = (n) => {
+  const units = [
+    'cero',
+    'uno',
+    'dos',
+    'tres',
+    'cuatro',
+    'cinco',
+    'seis',
+    'siete',
+    'ocho',
+    'nueve',
+    'diez',
+    'once',
+    'doce',
+    'trece',
+    'catorce',
+    'quince',
+    'dieciseis',
+    'diecisiete',
+    'dieciocho',
+    'diecinueve',
+    'veinte',
+  ];
+
+  if (n <= 20) return units[n];
+  if (n < 30) {
+    const veinti = ['veintiuno', 'veintidos', 'veintitres', 'veinticuatro', 'veinticinco', 'veintiseis', 'veintisiete', 'veintiocho', 'veintinueve'];
+    return veinti[n - 21];
+  }
+
+  const tensNames = ['', '', 'veinte', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
+  const ten = Math.floor(n / 10);
+  const unit = n % 10;
+  return unit ? `${tensNames[ten]} y ${units[unit]}` : tensNames[ten];
+};
+
+const toWordsInt = (n) => {
+  if (n === 0) return 'cero';
+  if (n < 100) return toWordsBelowHundred(n);
+  if (n === 100) return 'cien';
+  if (n < 1000) {
+    const hundredsNames = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos'];
+    const hundreds = Math.floor(n / 100);
+    const rest = n % 100;
+    return rest ? `${hundredsNames[hundreds]} ${toWordsBelowHundred(rest)}` : hundredsNames[hundreds];
+  }
+  if (n < 2000) {
+    const rest = n % 1000;
+    return rest ? `mil ${toWordsInt(rest)}` : 'mil';
+  }
+  if (n < 1000000) {
+    const thousands = Math.floor(n / 1000);
+    const rest = n % 1000;
+    return rest ? `${toWordsInt(thousands)} mil ${toWordsInt(rest)}` : `${toWordsInt(thousands)} mil`;
+  }
+  if (n < 2000000) {
+    const rest = n % 1000000;
+    return rest ? `un millon ${toWordsInt(rest)}` : 'un millon';
+  }
+  const millions = Math.floor(n / 1000000);
+  const rest = n % 1000000;
+  return rest ? `${toWordsInt(millions)} millones ${toWordsInt(rest)}` : `${toWordsInt(millions)} millones`;
+};
+
+const amountToWords = (value) => {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || numeric < 0) return 'CERO CON 00/100 SOLES';
+  const integer = Math.floor(numeric);
+  const cents = String(Math.round((numeric - integer) * 100)).padStart(2, '0');
+  return `${toWordsInt(integer)} con ${cents}/100 soles`.toUpperCase();
+};
+
+const loadTemplateByFormat = (format) => {
+  const normalized = normalizeReceiptFormat(format);
+  const templatePath = receiptTemplates[normalized];
+
+  const stat = fs.statSync(templatePath);
+  const cached = templateCache.get(normalized);
+
+  if (!cached || cached.mtimeMs !== stat.mtimeMs) {
+    const html = fs.readFileSync(templatePath, 'utf8');
+    templateCache.set(normalized, { html, mtimeMs: stat.mtimeMs });
+    return html;
+  }
+
+  return cached.html;
+};
+
+const replaceTokens = (template, replacements) =>
+  Object.entries(replacements).reduce((current, [key, value]) => {
+    return current.replaceAll(`{{${key}}}`, String(value ?? ''));
+  }, template);
+
+const normalizeDetailItem = (item = {}) => {
+  const quantity = Number(item.quantity || 1);
+  const unitPrice = Number(item.unit_price ?? item.total ?? 0);
+  const total = Number(item.total ?? quantity * unitPrice);
+  return {
+    description: String(item.description || '-'),
+    quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+    unit_price: Number.isFinite(unitPrice) ? unitPrice : 0,
+    total: Number.isFinite(total) ? total : 0,
+  };
+};
+
+const buildDetailRowsForF1 = (details = []) => {
+  if (!details.length) {
+    return '<tr><td>-</td><td class="num">1</td><td class="num">0.00</td><td class="num">0.00</td></tr>';
+  }
+
+  return details
+    .map((item) => {
+      const normalized = normalizeDetailItem(item);
+      return `<tr><td>${escapeHtml(normalized.description)}</td><td class="num">${escapeHtml(
+        String(normalized.quantity),
+      )}</td><td class="num">${escapeHtml(toPlainAmount(normalized.unit_price))}</td><td class="num">${escapeHtml(
+        toPlainAmount(normalized.total),
+      )}</td></tr>`;
+    })
+    .join('');
+};
+
+const buildDetailRowsForF2 = (details = []) => {
+  if (!details.length) {
+    return '<tr><td>1</td><td>1</td><td>-</td><td class="num">0.00</td><td class="num">0.00</td></tr>';
+  }
+
+  return details
+    .map((item, index) => {
+      const normalized = normalizeDetailItem(item);
+      return `<tr><td>${index + 1}</td><td>${escapeHtml(String(normalized.quantity))}</td><td>${escapeHtml(
+        normalized.description,
+      )}</td><td class="num">${escapeHtml(toPlainAmount(normalized.unit_price))}</td><td class="num">${escapeHtml(
+        toPlainAmount(normalized.total),
+      )}</td></tr>`;
+    })
+    .join('');
+};
+
+const buildQrBoxContent = (qrImageDataUrl, validationUrl) => {
+  const safeValidationUrl = escapeHtml(validationUrl || '-');
+  const safeQrImageDataUrl = String(qrImageDataUrl || '').trim();
+
+  if (safeQrImageDataUrl) {
+    return `<div class="qr-content"><img src="${escapeHtml(
+      safeQrImageDataUrl,
+    )}" alt="QR de validacion de boleta" /><small>${safeValidationUrl}</small></div>`;
+  }
+
+  return `<div class="qr-content"><strong>QR</strong><small>${safeValidationUrl}</small></div>`;
+};
+
+const buildReceiptHtml = ({
+  format = 'F2',
+  documentNumber,
+  issueDate,
+  issuedBy,
+  classroomLabel,
+  customerName,
+  studentName,
+  studentDocument,
+  details = [],
+  totalAmount = 0,
+  aCuentaAmount = null,
+  saldoAmount = null,
+  validationUrl = 'www.macroedunet.com',
+  qrImageDataUrl = '',
+  rucNumber = '20508338288',
+}) => {
+  const selectedFormat = normalizeReceiptFormat(format);
+  const template = loadTemplateByFormat(selectedFormat);
+  const normalizedDetails = details.map(normalizeDetailItem);
+  const totalNumeric = Number(totalAmount || 0);
+  const aCuentaNumeric = aCuentaAmount === null ? totalNumeric : Number(aCuentaAmount || 0);
+  const saldoNumeric = saldoAmount === null ? Math.max(totalNumeric - aCuentaNumeric, 0) : Number(saldoAmount || 0);
+  const dateParts = toDateParts(issueDate);
+
+  const isCanceled = Math.abs(saldoNumeric) < 0.000001;
+  const statusLabel = isCanceled ? 'CANCELADO' : 'PENDIENTE';
+
+  const replacements = {
+    DOCUMENT_NUMBER: escapeHtml(documentNumber || '-'),
+    ISSUE_DATE: escapeHtml(dateParts.date),
+    ISSUE_TIME: escapeHtml(dateParts.time),
+    ISSUED_BY: escapeHtml(issuedBy || '-'),
+    CLASSROOM_LABEL: escapeHtml(classroomLabel || '-'),
+    CUSTOMER_NAME: escapeHtml(customerName || studentName || '-'),
+    STUDENT_NAME: escapeHtml(studentName || '-'),
+    STUDENT_DOCUMENT: escapeHtml(studentDocument || '-'),
+    DETAIL_ROWS_F1: buildDetailRowsForF1(normalizedDetails),
+    DETAIL_ROWS_F2: buildDetailRowsForF2(normalizedDetails),
+    OP_GRAVADA: escapeHtml(toPlainAmount(0)),
+    OP_INAFECTA: escapeHtml(toPlainAmount(totalNumeric)),
+    OP_EXONERADA: escapeHtml(toPlainAmount(0)),
+    IGV: escapeHtml(toPlainAmount(0)),
+    TOTAL_AMOUNT_PLAIN: escapeHtml(toPlainAmount(totalNumeric)),
+    TOTAL_CURRENCY: escapeHtml(toCurrency(totalNumeric)),
+    A_CUENTA_CURRENCY: escapeHtml(toCurrency(aCuentaNumeric)),
+    SALDO_CURRENCY: escapeHtml(toCurrency(saldoNumeric)),
+    STATUS_LABEL: escapeHtml(statusLabel),
+    AMOUNT_WORDS: escapeHtml(amountToWords(totalNumeric)),
+    VALIDATION_URL: escapeHtml(validationUrl),
+    QR_BOX_CONTENT: buildQrBoxContent(qrImageDataUrl, validationUrl),
+    RUC_NUMBER: escapeHtml(rucNumber),
+  };
+
+  return replaceTokens(template, replacements);
+};
+
+module.exports = {
+  buildReceiptHtml,
+  normalizeReceiptFormat,
+  toCurrency,
+};

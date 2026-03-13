@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{DOCUMENT_TITLE}}</title>
+    <style>
+      :root {
+        --text: #142033;
+        --muted: #4f6079;
+        --line: #d8e0ee;
+        --bg-soft: #f7faff;
+        --accent: #1f3f8f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+        color: var(--text);
+        background: #ffffff;
+      }
+
+      .receipt {
+        max-width: 880px;
+        margin: 0 auto;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      .header {
+        padding: 20px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .title {
+        margin: 0;
+        font-size: 20px;
+        letter-spacing: 0.3px;
+        color: var(--accent);
+      }
+
+      .subtitle {
+        margin: 6px 0 0;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .meta {
+        text-align: right;
+        font-size: 13px;
+      }
+
+      .meta strong {
+        display: block;
+        font-size: 16px;
+      }
+
+      .section {
+        padding: 18px 20px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .section h2 {
+        margin: 0 0 12px;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 14px;
+      }
+
+      .field {
+        background: var(--bg-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+      }
+
+      .field small {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 2px;
+      }
+
+      .field span {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 9px 8px;
+        vertical-align: top;
+      }
+
+      th {
+        text-align: left;
+        color: var(--muted);
+        font-weight: 600;
+        background: #fbfdff;
+      }
+
+      td.amount {
+        text-align: right;
+        white-space: nowrap;
+        font-weight: 600;
+      }
+
+      .totals {
+        padding: 14px 20px;
+        display: flex;
+        justify-content: flex-end;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .totals-box {
+        min-width: 260px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+        background: var(--bg-soft);
+      }
+
+      .totals-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: 14px;
+      }
+
+      .totals-row strong {
+        font-size: 18px;
+        color: var(--accent);
+      }
+
+      .notes {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .notes h3 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--muted);
+      }
+
+      .notes p {
+        margin: 0;
+        font-size: 13px;
+        white-space: pre-wrap;
+      }
+
+      .footer {
+        padding: 12px 20px;
+        font-size: 11px;
+        color: var(--muted);
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      @media print {
+        body {
+          padding: 0;
+        }
+
+        .receipt {
+          border: 0;
+          border-radius: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <article class="receipt">
+      <header class="header">
+        <div>
+          <h1 class="title">{{DOCUMENT_TITLE}}</h1>
+          <p class="subtitle">{{DOCUMENT_SUBTITLE}}</p>
+        </div>
+        <div class="meta">
+          <strong>{{DOCUMENT_NUMBER}}</strong>
+          <span>Fecha: {{ISSUE_DATE}}</span>
+        </div>
+      </header>
+
+      <section class="section">
+        <h2>Datos del alumno</h2>
+        <div class="grid">
+          <div class="field">
+            <small>Alumno</small>
+            <span>{{STUDENT_NAME}}</span>
+          </div>
+          <div class="field">
+            <small>Documento</small>
+            <span>{{STUDENT_DOCUMENT}}</span>
+          </div>
+          <div class="field">
+            <small>Curso</small>
+            <span>{{COURSE_NAME}}</span>
+          </div>
+          <div class="field">
+            <small>Sede</small>
+            <span>{{CAMPUS_NAME}}</span>
+          </div>
+          <div class="field">
+            <small>Periodo</small>
+            <span>{{PERIOD_NAME}}</span>
+          </div>
+          <div class="field">
+            <small>Registrado por</small>
+            <span>{{PROCESSED_BY_NAME}}</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Detalle</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>{{DETAIL_COL1}}</th>
+              <th>{{DETAIL_COL2}}</th>
+              <th style="text-align: right">{{DETAIL_COL3}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{DETAIL_ROWS}}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="totals">
+        <div class="totals-box">
+          <div class="totals-row">
+            <span>{{TOTAL_LABEL}}</span>
+            <strong>{{TOTAL_AMOUNT}}</strong>
+          </div>
+        </div>
+      </section>
+
+      {{NOTES_BLOCK}}
+
+      <footer class="footer">
+        <span>{{FOOTER_LEFT}}</span>
+        <span>{{FOOTER_RIGHT}}</span>
+      </footer>
+    </article>
+  </body>
+</html>

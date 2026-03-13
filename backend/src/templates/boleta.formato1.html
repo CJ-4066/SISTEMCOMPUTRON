@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Boleta Electronica {{DOCUMENT_NUMBER}}</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 14px;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #111;
+        background: #fff;
+      }
+
+      .sheet {
+        max-width: 760px;
+        margin: 0 auto;
+      }
+
+      .ticket {
+        border: 1px dashed #555;
+        padding: 10px 10px 8px;
+        font-size: 11px;
+      }
+
+      .center {
+        text-align: center;
+      }
+
+      .title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .doc-number {
+        margin: 2px 0 6px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .meta-line {
+        margin: 0 0 4px;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .line {
+        margin: 0 0 6px;
+        padding-bottom: 3px;
+        border-bottom: 1px dotted #888;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 2px;
+      }
+
+      th,
+      td {
+        border-bottom: 1px dotted #888;
+        padding: 3px 2px;
+        font-size: 11px;
+      }
+
+      th {
+        text-align: left;
+      }
+
+      .num {
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      .qr-and-totals {
+        margin-top: 8px;
+        display: grid;
+        grid-template-columns: 116px 1fr;
+        gap: 8px;
+        align-items: start;
+      }
+
+      .qr-box {
+        width: 116px;
+        min-height: 116px;
+        border: 1px solid #222;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4px;
+      }
+
+      .qr-content {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: center;
+        text-align: center;
+      }
+
+      .qr-content img {
+        width: 90px;
+        height: 90px;
+        object-fit: contain;
+      }
+
+      .qr-content small {
+        display: block;
+        width: 100%;
+        font-size: 8px;
+        line-height: 1.1;
+        color: #333;
+        word-break: break-all;
+      }
+
+      .sum-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 4px;
+      }
+
+      .sum-row.total {
+        margin-top: 6px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .words {
+        margin-top: 8px;
+        border-top: 1px dotted #888;
+        padding-top: 6px;
+        text-align: center;
+        font-size: 11px;
+      }
+
+      .footer {
+        margin-top: 8px;
+        text-align: center;
+        font-size: 10px;
+      }
+
+      @media print {
+        body {
+          padding: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="sheet">
+      <section class="ticket">
+        <p class="title center">Boleta Electronica</p>
+        <p class="doc-number center">{{DOCUMENT_NUMBER}}</p>
+
+        <p class="meta-line">
+          <span>FECHA DE EMISION: {{ISSUE_DATE}}</span>
+          <span>HORA: {{ISSUE_TIME}}</span>
+        </p>
+        <p class="line">AULA: {{CLASSROOM_LABEL}}</p>
+        <p class="line">EMITIDO POR: {{ISSUED_BY}}</p>
+        <p class="line">Senores: {{CUSTOMER_NAME}}</p>
+        <p class="line">Alumno: {{STUDENT_NAME}}</p>
+        <p class="line">DNI: {{STUDENT_DOCUMENT}}</p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>DESCRIPCION</th>
+              <th class="num">CANTIDAD</th>
+              <th class="num">P.UNITARIO</th>
+              <th class="num">TOTAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{DETAIL_ROWS_F1}}
+          </tbody>
+        </table>
+
+        <div class="qr-and-totals">
+          <div class="qr-box">{{QR_BOX_CONTENT}}</div>
+          <div>
+            <div class="sum-row"><span>OPERACION GRAVADA</span><span>{{OP_GRAVADA}}</span></div>
+            <div class="sum-row"><span>OPERACION INAFECTA</span><span>{{OP_INAFECTA}}</span></div>
+            <div class="sum-row"><span>OPERACION EXONERADA</span><span>{{OP_EXONERADA}}</span></div>
+            <div class="sum-row"><span>I.G.V</span><span>{{IGV}}</span></div>
+            <div class="sum-row total"><span>IMPORTE TOTAL (PEN)</span><span>{{TOTAL_AMOUNT_PLAIN}}</span></div>
+          </div>
+        </div>
+
+        <div class="words">SON: {{AMOUNT_WORDS}}</div>
+        <div class="footer">
+          <div>Representacion impresa del documento de venta electronica</div>
+          <div>Este documento puede ser validado en {{VALIDATION_URL}}</div>
+        </div>
+      </section>
+
+    </main>
+  </body>
+</html>

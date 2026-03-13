@@ -1,0 +1,1078 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Generador de Certificados</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;700&family=Libre+Baskerville:wght@400;700&family=Poppins:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --ui-primary-50: #eefbf8;
+        --ui-primary-100: #d2f5ed;
+        --ui-primary-200: #a8e9db;
+        --ui-primary-300: #77d8c4;
+        --ui-primary-600: #1f8273;
+        --ui-primary-700: #1c685d;
+        --ui-primary-800: #1b534b;
+        --ui-accent-100: #ffedcc;
+        --ui-accent-500: #f98617;
+        --blue-900: #183452;
+        --blue-700: #244d77;
+        --blue-500: #2d638f;
+        --gold-600: #c79d2f;
+        --gold-500: #d9b03f;
+        --bg: #eef1f7;
+        --panel: #ffffff;
+        --ink: #16302b;
+        --muted: #3d5b55;
+        --sheet-ratio: 1.4484;
+        --embed-controls-width: min(420px, 92vw);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 10% 10%, rgba(119, 216, 196, 0.3), transparent 40%),
+          radial-gradient(circle at 80% 0%, rgba(255, 216, 151, 0.25), transparent 45%),
+          #f4faf8;
+        color: var(--ink);
+        font-family: "Poppins", sans-serif;
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: minmax(390px, 460px) minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      .controls {
+        padding: 24px;
+        border-right: 1px solid var(--ui-primary-200);
+        background: var(--panel);
+        overflow: auto;
+      }
+
+      .controls h1 {
+        margin: 0 0 8px;
+        letter-spacing: -0.01em;
+        font-size: 1.65rem;
+        font-weight: 700;
+        color: var(--ui-primary-800);
+      }
+
+      .controls p {
+        margin: 0 0 18px;
+        color: var(--muted);
+        line-height: 1.5;
+        font-size: 0.92rem;
+      }
+
+      .field-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .field-grid label {
+        display: grid;
+        gap: 6px;
+        font-size: 0.86rem;
+        font-weight: 600;
+        color: var(--ui-primary-800);
+      }
+
+      .field-grid input,
+      .field-grid select {
+        border: 1px solid var(--ui-primary-200);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font: inherit;
+        color: var(--ink);
+        background: #fff;
+        transition: border-color 140ms ease, box-shadow 140ms ease;
+      }
+
+      .field-grid input:focus,
+      .field-grid select:focus {
+        outline: none;
+        border-color: var(--ui-primary-300);
+        box-shadow: 0 0 0 3px rgba(119, 216, 196, 0.25);
+      }
+
+      .short-row {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .actions {
+        margin-top: 18px;
+        display: grid;
+        gap: 10px;
+      }
+
+      button {
+        border: 1px solid transparent;
+        padding: 10px 14px;
+        font: inherit;
+        border-radius: 12px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: transform 140ms ease, filter 140ms ease, background-color 140ms ease, border-color 140ms ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+      }
+
+      .btn-primary {
+        background: linear-gradient(130deg, var(--ui-primary-600), #2ca38f);
+        color: white;
+      }
+
+      .btn-secondary {
+        background: #fff;
+        border-color: var(--ui-primary-200);
+        color: var(--ui-primary-700);
+      }
+
+      .btn-secondary:hover {
+        background: var(--ui-primary-50);
+      }
+
+      .controls-close {
+        display: none;
+      }
+
+      .embed-toolbar {
+        display: none;
+      }
+
+      .embed-backdrop {
+        display: none;
+      }
+
+      .workspace {
+        padding: clamp(8px, 1.2vw, 14px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+
+      .certificate-sheet {
+        position: relative;
+        width: min(1260px, calc(100% - 2px), calc((100vh - 24px) * var(--sheet-ratio)));
+        aspect-ratio: 2048 / 1414;
+        max-height: calc(100vh - 24px);
+        background: #e8ecf4;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 20px 45px rgba(28, 104, 93, 0.2);
+      }
+
+      .template-image {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center;
+        opacity: 0;
+        transition: opacity 180ms ease-in-out;
+      }
+
+      .certificate-sheet.has-template .template-image {
+        opacity: 1;
+      }
+
+      .certificate-sheet.has-template .decorative-layer {
+        display: none;
+      }
+
+      .certificate-sheet.has-template .brand,
+      .certificate-sheet.has-template .cert-title,
+      .certificate-sheet.has-template .grant-line,
+      .certificate-sheet.has-template .signatures {
+        display: none;
+      }
+
+      .decorative-layer {
+        position: absolute;
+        inset: 0;
+      }
+
+      .corner-left-main,
+      .corner-right-main,
+      .corner-diagonal,
+      .corner-bottom-light,
+      .corner-bottom-dark {
+        position: absolute;
+      }
+
+      .corner-left-main {
+        width: 37%;
+        height: 45%;
+        left: -12%;
+        top: -10%;
+        background: linear-gradient(130deg, #123150 0%, #284e74 82%);
+        transform: rotate(-9deg);
+      }
+
+      .corner-right-main {
+        width: 34%;
+        height: 42%;
+        right: -14%;
+        bottom: -18%;
+        background: linear-gradient(135deg, #123150 0%, #325979 70%, #193a59 100%);
+        transform: rotate(-8deg);
+      }
+
+      .corner-diagonal {
+        width: 130%;
+        height: 32%;
+        left: -16%;
+        top: 43%;
+        background: linear-gradient(130deg, rgba(255, 255, 255, 0) 2%, rgba(255, 255, 255, 0.6) 35%, rgba(255, 255, 255, 0.06) 62%);
+        transform: rotate(-36deg);
+      }
+
+      .corner-bottom-light {
+        width: 27%;
+        height: 32%;
+        right: -8%;
+        bottom: -6%;
+        background: linear-gradient(130deg, #f7e08c 0%, #cf9f27 55%, #a07818 100%);
+        transform: rotate(-10deg);
+      }
+
+      .corner-bottom-dark {
+        width: 24%;
+        height: 24%;
+        right: 9%;
+        bottom: -11%;
+        border: 28px solid #123150;
+        transform: rotate(-40deg);
+      }
+
+      .gold-outline-outer,
+      .gold-outline-inner {
+        position: absolute;
+        border: 2px solid rgba(213, 170, 59, 0.9);
+        inset: 1.5%;
+      }
+
+      .gold-outline-inner {
+        inset: 3.8%;
+        border-width: 1px;
+        opacity: 0.85;
+      }
+
+      .brand {
+        position: absolute;
+        top: 8.4%;
+        right: 7.6%;
+        text-align: right;
+        color: #2f2a89;
+      }
+
+      .brand .logo {
+        display: block;
+        font-size: clamp(24px, 2.8vw, 54px);
+        line-height: 0.9;
+        font-family: "Bebas Neue", sans-serif;
+        letter-spacing: 2px;
+      }
+
+      .brand .tagline {
+        font-size: clamp(11px, 0.9vw, 18px);
+        font-family: "Libre Baskerville", serif;
+        font-style: italic;
+        color: #18253d;
+      }
+
+      .cert-title {
+        margin: 0;
+        position: absolute;
+        top: 20.8%;
+        width: 100%;
+        text-align: center;
+        font-size: clamp(56px, 5.8vw, 118px);
+        letter-spacing: 2px;
+        font-family: "Bebas Neue", sans-serif;
+        color: var(--gold-500);
+        text-shadow: 0 2px 0 rgba(0, 0, 0, 0.08);
+      }
+
+      .grant-line {
+        margin: 0;
+        position: absolute;
+        top: 33.8%;
+        width: 100%;
+        text-align: center;
+        font-size: clamp(17px, 1.65vw, 30px);
+        font-family: "DM Sans", sans-serif;
+        color: #1a3555;
+      }
+
+      .student-name {
+        margin: 0;
+        position: absolute;
+        top: 40.2%;
+        left: 9%;
+        width: 66%;
+        text-align: center;
+        font-size: clamp(20px, 2.05vw, 38px);
+        line-height: 1.1;
+        letter-spacing: 0.8px;
+        font-family: "Libre Baskerville", serif;
+        text-transform: uppercase;
+        color: #0f2b4c;
+        white-space: nowrap;
+      }
+
+      .body-main {
+        margin: 0;
+        position: absolute;
+        top: 48.7%;
+        left: 9%;
+        width: 66%;
+        text-align: center;
+        font-size: clamp(13px, 1vw, 20px);
+        line-height: 1.45;
+        color: #213a57;
+      }
+
+      .body-detail {
+        margin: 0;
+        position: absolute;
+        top: 58.6%;
+        left: 9%;
+        width: 66%;
+        text-align: center;
+        font-size: clamp(12px, 0.9vw, 17px);
+        line-height: 1.42;
+        color: #294564;
+      }
+
+      .issue-line {
+        margin: 0;
+        position: absolute;
+        top: 66.9%;
+        left: 12%;
+        width: 60%;
+        text-align: center;
+        font-size: clamp(11px, 0.84vw, 16px);
+        color: #1d3654;
+      }
+
+      .photo-slot {
+        position: absolute;
+        top: 34%;
+        right: 7.4%;
+        width: 13.5%;
+        aspect-ratio: 4 / 5;
+        border: 4px solid #d1ad42;
+        background: #f7f7f7;
+        display: grid;
+        place-items: center;
+      }
+
+      .photo-slot img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: none;
+      }
+
+      .photo-slot.has-photo img {
+        display: block;
+      }
+
+      .photo-placeholder {
+        font-size: clamp(14px, 1.1vw, 24px);
+        color: #607188;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .photo-slot.has-photo .photo-placeholder {
+        display: none;
+      }
+
+      .code-strip {
+        position: absolute;
+        top: calc(34% + 13.5% * 1.25 + 2.2%);
+        right: 7.4%;
+        width: 13.5%;
+        min-height: 30px;
+        border: 1px solid #b7bec9;
+        background: #f5f7fb;
+        text-align: center;
+        padding: 6px 5px;
+        font-size: clamp(10px, 0.72vw, 13px);
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+        color: #304866;
+      }
+
+      .signatures {
+        position: absolute;
+        left: 8%;
+        right: 8%;
+        bottom: 6.5%;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .sign-block {
+        text-align: center;
+      }
+
+      .sign-line {
+        border-top: 2px solid #193653;
+        width: 86%;
+        margin: 0 auto 8px;
+      }
+
+      .sign-name {
+        margin: 0;
+        font-family: "Libre Baskerville", serif;
+        font-size: clamp(13px, 1vw, 19px);
+        color: #132944;
+      }
+
+      .sign-role {
+        margin: 2px 0 0;
+        font-size: clamp(11px, 0.82vw, 15px);
+        color: #3f4f64;
+      }
+
+      @media (max-width: 900px) {
+        .app {
+          grid-template-columns: 1fr;
+        }
+
+        .controls {
+          border-right: 0;
+          border-bottom: 1px solid var(--ui-primary-200);
+          padding: 18px 16px;
+        }
+
+        .workspace {
+          padding: 14px;
+        }
+      }
+
+      @media (max-width: 820px) {
+        .short-row {
+          grid-template-columns: 1fr;
+        }
+
+        .signatures {
+          gap: 8px;
+        }
+      }
+
+      body.embedded {
+        overflow: hidden;
+      }
+
+      body.embedded .app {
+        grid-template-columns: 1fr;
+        min-height: 100vh;
+      }
+
+      body.embedded .controls {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 60;
+        width: var(--embed-controls-width);
+        transform: translateX(-104%);
+        transition: transform 180ms ease-in-out;
+        border-right: 1px solid var(--ui-primary-200);
+        border-bottom: 0;
+        box-shadow: 0 18px 40px rgba(28, 104, 93, 0.26);
+      }
+
+      body.embedded.embed-controls-open .controls {
+        transform: translateX(0);
+      }
+
+      body.embedded .controls-close {
+        display: inline-flex;
+        margin-bottom: 12px;
+      }
+
+      body.embedded .workspace {
+        padding: 10px;
+        min-height: 100vh;
+        transition: padding-left 180ms ease-in-out;
+      }
+
+      body.embedded .certificate-sheet {
+        width: min(1280px, calc(100vw - 20px), calc((100vh - 20px) * var(--sheet-ratio)));
+        max-height: calc(100vh - 20px);
+      }
+
+      body.embedded.embed-controls-open .workspace {
+        padding-left: calc(var(--embed-controls-width) + 12px);
+      }
+
+      body.embedded.embed-controls-open .certificate-sheet {
+        width: min(1220px, calc(100vw - var(--embed-controls-width) - 20px), calc((100vh - 20px) * var(--sheet-ratio)));
+      }
+
+      body.embedded .embed-toolbar {
+        position: fixed;
+        left: 10px;
+        top: 10px;
+        z-index: 55;
+        display: flex;
+        gap: 8px;
+      }
+
+      @media (max-width: 1080px) {
+        body.embedded.embed-controls-open .workspace {
+          padding-left: 10px;
+        }
+
+        body.embedded.embed-controls-open .certificate-sheet {
+          width: min(1280px, calc(100vw - 20px), calc((100vh - 20px) * var(--sheet-ratio)));
+        }
+      }
+
+      body.embedded.embed-controls-open .embed-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: block;
+        background: rgba(15, 31, 51, 0.28);
+      }
+
+      @page {
+        margin: 0;
+        size: landscape;
+      }
+
+      @media print {
+        * {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        body {
+          background: white;
+        }
+
+        .embed-toolbar,
+        .embed-backdrop {
+          display: none !important;
+        }
+
+        .controls {
+          display: none;
+        }
+
+        .workspace {
+          padding: 0;
+        }
+
+        .certificate-sheet {
+          width: 100vw;
+          height: 100vh;
+          aspect-ratio: auto;
+          border-radius: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="embed-toolbar">
+      <button class="btn-secondary" type="button" id="openControlsButton">Editar datos</button>
+      <button class="btn-primary" type="button" id="embedPrintButton">Imprimir</button>
+    </div>
+    <div class="embed-backdrop" id="embedBackdrop"></div>
+    <div class="app">
+      <aside class="controls">
+        <button class="btn-secondary controls-close" type="button" id="closeControlsButton">Cerrar panel</button>
+        <h1>Generador de Certificado</h1>
+        <p>
+          Completa los datos del alumno y el curso. La plantilla oficial ya está fijada por defecto; luego exporta el
+          certificado con imprimir o guardar como PDF.
+        </p>
+
+        <form id="certificateForm">
+          <div class="field-grid">
+            <label>
+              Foto del alumno
+              <input id="photoFile" type="file" accept="image/*" />
+            </label>
+            <label>
+              Nombre del alumno
+              <input id="studentNameInput" type="text" placeholder="Ejemplo: Juan Perez Lopez" />
+            </label>
+            <div class="short-row">
+              <label>
+                Documento
+                <input id="studentDocInput" type="text" placeholder="DNI o codigo" />
+              </label>
+              <label>
+                Codigo certificado
+                <input id="certCodeInput" type="text" placeholder="CMP-2026-00125" />
+              </label>
+            </div>
+            <label>
+              Curso
+              <input id="courseInput" type="text" placeholder="Excel avanzado y BI" />
+            </label>
+            <div class="short-row">
+              <label>
+                Horas academicas
+                <input id="hoursInput" type="number" min="1" placeholder="120" />
+              </label>
+              <label>
+                Modalidad
+                <select id="modalityInput">
+                  <option value="Virtual">Virtual</option>
+                  <option value="Hibrido">Hibrido</option>
+                  <option value="Presencial">Presencial</option>
+                </select>
+              </label>
+            </div>
+            <div class="short-row">
+              <label>
+                Fecha inicio
+                <input id="startDateInput" type="date" />
+              </label>
+              <label>
+                Fecha fin
+                <input id="endDateInput" type="date" />
+              </label>
+            </div>
+            <div class="short-row">
+              <label>
+                Fecha emision
+                <input id="issueDateInput" type="date" />
+              </label>
+              <label>
+                Ciudad
+                <input id="cityInput" type="text" placeholder="Lima" />
+              </label>
+            </div>
+            <label>
+              Institucion emisora
+              <input id="organizationInput" type="text" placeholder="Instituto Computron" />
+            </label>
+          </div>
+        </form>
+
+        <div class="actions">
+          <button class="btn-primary" type="button" id="printButton">Imprimir o guardar PDF</button>
+          <button class="btn-secondary" type="button" id="demoButton">Cargar ejemplo</button>
+          <button class="btn-secondary" type="button" id="clearButton">Limpiar campos</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="certificate-sheet" id="certificateSheet">
+          <img class="template-image" id="templateImage" alt="" />
+
+          <div class="decorative-layer">
+            <div class="corner-left-main"></div>
+            <div class="corner-right-main"></div>
+            <div class="corner-diagonal"></div>
+            <div class="corner-bottom-light"></div>
+            <div class="corner-bottom-dark"></div>
+            <div class="gold-outline-outer"></div>
+            <div class="gold-outline-inner"></div>
+          </div>
+
+          <div class="brand">
+            <span class="logo">computron</span>
+            <span class="tagline">Tu mejor alternativa</span>
+          </div>
+
+          <h2 class="cert-title">CERTIFICADO</h2>
+          <p class="grant-line">El presente certificado se otorga a</p>
+          <p class="student-name" id="studentNameView">NOMBRE DEL ALUMNO</p>
+          <p class="body-main" id="bodyMainView">
+            Por haber culminado satisfactoriamente el curso "Curso de ejemplo" con una duracion de 120 horas
+            academicas en modalidad virtual.
+          </p>
+          <p class="body-detail" id="bodyDetailView">
+            Desarrollado del 10/01/2026 al 20/02/2026, cumpliendo los requisitos y evaluaciones de la institucion.
+          </p>
+          <p class="issue-line" id="issueLineView">Lima, 20 de febrero de 2026</p>
+
+          <div class="photo-slot" id="photoSlot">
+            <img id="photoView" alt="Foto del alumno" />
+            <span class="photo-placeholder">Foto</span>
+          </div>
+          <div class="code-strip" id="codeView">Codigo: CMP-2026-00125</div>
+
+          <div class="signatures">
+            <div class="sign-block">
+              <div class="sign-line"></div>
+              <p class="sign-name" id="sign1NameView">Carlos Ruiz Terrones</p>
+              <p class="sign-role" id="sign1RoleView">Coordinacion Academica</p>
+            </div>
+            <div class="sign-block">
+              <div class="sign-line"></div>
+              <p class="sign-name" id="sign2NameView">Jhony Bacon Terrones</p>
+              <p class="sign-role" id="sign2RoleView">Secretario General</p>
+            </div>
+            <div class="sign-block">
+              <div class="sign-line"></div>
+              <p class="sign-name" id="sign3NameView">Richar Eli Bacon Terrones</p>
+              <p class="sign-role" id="sign3RoleView">Director General</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      (() => {
+        const queryParams = new URLSearchParams(window.location.search);
+        const isEmbedded = queryParams.get("embed") === "1";
+        const form = document.getElementById("certificateForm");
+        const certificateSheet = document.getElementById("certificateSheet");
+        const templateImage = document.getElementById("templateImage");
+        const photoView = document.getElementById("photoView");
+        const photoSlot = document.getElementById("photoSlot");
+        const openControlsButton = document.getElementById("openControlsButton");
+        const closeControlsButton = document.getElementById("closeControlsButton");
+        const embedBackdrop = document.getElementById("embedBackdrop");
+        const embedPrintButton = document.getElementById("embedPrintButton");
+
+        const state = {
+          photoObjectUrl: null
+        };
+        const AUTH_STORAGE_KEY = "computron_auth";
+
+        const defaults = {
+          studentNameInput: "Nombre del alumno",
+          studentDocInput: "",
+          certCodeInput: "CMP-2026-00125",
+          courseInput: "Curso de ejemplo",
+          hoursInput: "120",
+          modalityInput: "Virtual",
+          startDateInput: "2026-01-10",
+          endDateInput: "2026-02-20",
+          issueDateInput: "2026-02-20",
+          cityInput: "Lima",
+          organizationInput: "Instituto Computron"
+        };
+
+        const setInputValue = (id, value) => {
+          const input = document.getElementById(id);
+          if (input) {
+            input.value = value ?? "";
+          }
+        };
+
+        const getInputValue = (id) => {
+          const input = document.getElementById(id);
+          return input ? input.value.trim() : "";
+        };
+
+        const readStoredAuth = () => {
+          try {
+            const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+            return raw ? JSON.parse(raw) : null;
+          } catch (_error) {
+            return null;
+          }
+        };
+
+        const buildLibraryPayload = () => {
+          const studentName = getInputValue("studentNameInput");
+          if (!studentName) return null;
+
+          const rawHours = getInputValue("hoursInput");
+          const hours = Number.parseInt(rawHours, 10);
+          const auth = readStoredAuth();
+          const baseCampusId = Number(auth?.user?.base_campus_id || 0);
+
+          return {
+            certificate_code: getInputValue("certCodeInput") || null,
+            student_name: studentName,
+            student_document: getInputValue("studentDocInput") || null,
+            course_name: getInputValue("courseInput") || null,
+            hours_academic: Number.isFinite(hours) && hours > 0 ? hours : null,
+            modality: getInputValue("modalityInput") || null,
+            start_date: getInputValue("startDateInput") || null,
+            end_date: getInputValue("endDateInput") || null,
+            issue_date: getInputValue("issueDateInput") || null,
+            city: getInputValue("cityInput") || null,
+            organization: getInputValue("organizationInput") || null,
+            campus_id: baseCampusId > 0 ? baseCampusId : null
+          };
+        };
+
+        const registerCertificateInLibrary = () => {
+          const auth = readStoredAuth();
+          const accessToken = auth?.accessToken || "";
+          const payload = buildLibraryPayload();
+          if (!accessToken || !payload) return;
+
+          fetch("/api/certificates/library", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`
+            },
+            body: JSON.stringify(payload),
+            keepalive: true
+          }).catch(() => {});
+        };
+
+        const formatDateShort = (isoDate) => {
+          if (!isoDate) return "--/--/----";
+          const [year, month, day] = isoDate.split("-");
+          if (!year || !month || !day) return "--/--/----";
+          return `${day}/${month}/${year}`;
+        };
+
+        const formatDateLong = (isoDate) => {
+          if (!isoDate) return "--/--/----";
+          const date = new Date(`${isoDate}T00:00:00`);
+          if (Number.isNaN(date.getTime())) return "--/--/----";
+          return new Intl.DateTimeFormat("es-PE", {
+            day: "2-digit",
+            month: "long",
+            year: "numeric"
+          }).format(date);
+        };
+
+        const parseQueryParams = () => {
+          const mapping = {
+            nombre: "studentNameInput",
+            documento: "studentDocInput",
+            codigo: "certCodeInput",
+            curso: "courseInput",
+            horas: "hoursInput",
+            modalidad: "modalityInput",
+            inicio: "startDateInput",
+            fin: "endDateInput",
+            emision: "issueDateInput",
+            ciudad: "cityInput",
+            institucion: "organizationInput"
+          };
+
+          Object.entries(mapping).forEach(([queryKey, inputId]) => {
+            const value = queryParams.get(queryKey);
+            if (value) {
+              setInputValue(inputId, value);
+            }
+          });
+        };
+
+        const openControls = () => {
+          document.body.classList.add("embed-controls-open");
+          window.setTimeout(() => {
+            adjustTypography();
+          }, 200);
+        };
+
+        const closeControls = () => {
+          document.body.classList.remove("embed-controls-open");
+          window.setTimeout(() => {
+            adjustTypography();
+          }, 200);
+        };
+
+        const resetFontSize = (element) => {
+          if (!element) return 0;
+          if (!element.dataset.baseFontSize) {
+            element.dataset.baseFontSize = window.getComputedStyle(element).fontSize;
+          }
+          element.style.fontSize = element.dataset.baseFontSize;
+          return Number.parseFloat(element.dataset.baseFontSize);
+        };
+
+        const fitSingleLine = (element, minPx) => {
+          if (!element) return;
+          let fontSize = resetFontSize(element);
+          if (!Number.isFinite(fontSize)) return;
+          let loops = 0;
+          while (element.scrollWidth > element.clientWidth && fontSize > minPx && loops < 100) {
+            fontSize -= 0.5;
+            element.style.fontSize = `${fontSize}px`;
+            loops += 1;
+          }
+        };
+
+        const fitParagraph = (element, maxLines, minPx) => {
+          if (!element) return;
+          let fontSize = resetFontSize(element);
+          if (!Number.isFinite(fontSize)) return;
+
+          let loops = 0;
+          while (fontSize > minPx && loops < 100) {
+            const styles = window.getComputedStyle(element);
+            let lineHeight = Number.parseFloat(styles.lineHeight);
+            if (!Number.isFinite(lineHeight)) {
+              lineHeight = fontSize * 1.4;
+            }
+            const maxHeight = lineHeight * maxLines;
+            if (element.scrollHeight <= maxHeight + 1) {
+              return;
+            }
+            fontSize -= 0.5;
+            element.style.fontSize = `${fontSize}px`;
+            loops += 1;
+          }
+        };
+
+        const adjustTypography = () => {
+          fitSingleLine(document.getElementById("studentNameView"), 15);
+          fitParagraph(document.getElementById("bodyMainView"), 4, 10.5);
+          fitParagraph(document.getElementById("bodyDetailView"), 3, 10);
+          fitSingleLine(document.getElementById("issueLineView"), 10);
+        };
+
+        const revokeObjectUrl = (key) => {
+          if (state[key]) {
+            URL.revokeObjectURL(state[key]);
+            state[key] = null;
+          }
+        };
+
+        const applyTemplateImage = (src) => {
+          if (!src) {
+            templateImage.removeAttribute("src");
+            certificateSheet.classList.remove("has-template");
+            return;
+          }
+          templateImage.src = src;
+          certificateSheet.classList.add("has-template");
+        };
+
+        const applyOfficialTemplate = () => {
+          const cacheBust = queryParams.get("v") || `${Date.now()}`;
+          const officialTemplateUrl = `/certificado-oficial.png?v=${encodeURIComponent(cacheBust)}`;
+          applyTemplateImage(officialTemplateUrl);
+        };
+
+        const handlePhotoUpload = (file) => {
+          revokeObjectUrl("photoObjectUrl");
+          if (!file) {
+            photoView.removeAttribute("src");
+            photoSlot.classList.remove("has-photo");
+            return;
+          }
+          const objectUrl = URL.createObjectURL(file);
+          state.photoObjectUrl = objectUrl;
+          photoView.src = objectUrl;
+          photoSlot.classList.add("has-photo");
+        };
+
+        const updatePreview = () => {
+          const studentName = getInputValue("studentNameInput") || "Nombre del alumno";
+          const studentDoc = getInputValue("studentDocInput");
+          const certCode = getInputValue("certCodeInput") || "CMP-2026-00125";
+          const course = getInputValue("courseInput") || "Curso de ejemplo";
+          const hours = getInputValue("hoursInput") || "120";
+          const modality = getInputValue("modalityInput") || "Virtual";
+          const startDate = formatDateShort(getInputValue("startDateInput"));
+          const endDate = formatDateShort(getInputValue("endDateInput"));
+          const issueDate = formatDateLong(getInputValue("issueDateInput"));
+          const city = getInputValue("cityInput") || "Lima";
+          const organization = getInputValue("organizationInput") || "Instituto Computron";
+
+          document.getElementById("studentNameView").textContent = studentName.toUpperCase();
+          document.getElementById(
+            "bodyMainView"
+          ).textContent = `Por haber culminado satisfactoriamente el curso "${course}" con una duracion de ${hours} horas academicas en modalidad ${modality}.`;
+          document.getElementById(
+            "bodyDetailView"
+          ).textContent = `Desarrollado del ${startDate} al ${endDate}, cumpliendo los requisitos y evaluaciones establecidos por ${organization}.`;
+          document.getElementById("issueLineView").textContent = `${city}, ${issueDate}`;
+          document.getElementById("codeView").textContent = studentDoc
+            ? `Codigo: ${certCode} | Doc: ${studentDoc}`
+            : `Codigo: ${certCode}`;
+          adjustTypography();
+        };
+
+        const loadDefaults = () => {
+          Object.entries(defaults).forEach(([id, value]) => setInputValue(id, value));
+          updatePreview();
+        };
+
+        const clearForm = () => {
+          form.reset();
+          handlePhotoUpload(null);
+          updatePreview();
+        };
+
+        form.addEventListener("input", updatePreview);
+        form.addEventListener("change", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLInputElement)) return;
+          if (target.id === "photoFile") {
+            handlePhotoUpload(target.files?.[0] || null);
+          }
+          updatePreview();
+        });
+
+        document.getElementById("printButton").addEventListener("click", () => {
+          registerCertificateInLibrary();
+          window.print();
+        });
+
+        embedPrintButton?.addEventListener("click", () => {
+          registerCertificateInLibrary();
+          window.print();
+        });
+
+        document.getElementById("demoButton").addEventListener("click", () => {
+          loadDefaults();
+        });
+
+        document.getElementById("clearButton").addEventListener("click", () => {
+          clearForm();
+        });
+
+        window.addEventListener("resize", adjustTypography);
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            closeControls();
+          }
+        });
+
+        if (isEmbedded) {
+          document.body.classList.add("embedded");
+          openControlsButton?.addEventListener("click", openControls);
+          closeControlsButton?.addEventListener("click", closeControls);
+          embedBackdrop?.addEventListener("click", closeControls);
+          window.setTimeout(() => {
+            openControls();
+          }, 120);
+        }
+
+        applyOfficialTemplate();
+
+        parseQueryParams();
+        loadDefaults();
+      })();
+    </script>
+  </body>
+</html>

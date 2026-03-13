@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: computron-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: computron
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - '5432:5432'
+    volumes:
+      - computron_pg_data:/var/lib/postgresql/data
+
+volumes:
+  computron_pg_data:
