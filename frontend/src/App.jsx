@@ -17,6 +17,7 @@ const CertificateLibraryPage = lazy(() => import('./pages/CertificateLibraryPage
 const CertificatesPage = lazy(() => import('./pages/CertificatesPage'));
 const StudentGradesPage = lazy(() => import('./pages/StudentGradesPage'));
 const UsersPage = lazy(() => import('./pages/UsersPage'));
+const VirtualLibraryPage = lazy(() => import('./pages/VirtualLibraryPage'));
 
 const routeFallback = (
   <section className="card">
@@ -119,6 +120,14 @@ export default function App() {
                 element={
                   <Suspense fallback={routeFallback}>
                     <CertificateLibraryPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/virtual-library"
+                element={
+                  <Suspense fallback={routeFallback}>
+                    <VirtualLibraryPage />
                   </Suspense>
                 }
               />

@@ -4,6 +4,7 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
 import TeacherPracticesPanel from '../components/TeacherPracticesPanel';
+import CourseResourcesPanel from '../components/CourseResourcesPanel';
 
 const STATUS_OPTIONS = [
   { value: 'PRESENTE', label: 'ASISTIO' },
@@ -522,7 +523,9 @@ export default function TeacherCourseWorkspacePage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-primary-900">Salon del curso</h1>
-          <p className="text-sm text-primary-700">Asistencia, practicas y foro del salon en una sola vista de trabajo.</p>
+          <p className="text-sm text-primary-700">
+            Asistencia, aula virtual, practicas y foro del salon en una sola vista de trabajo.
+          </p>
         </div>
         <Link
           to="/courses"
@@ -556,6 +559,17 @@ export default function TeacherCourseWorkspacePage() {
             </p>
           </div>
         </article>
+      ) : null}
+
+      {assignment ? (
+        <CourseResourcesPanel
+          assignmentId={assignment.assignment_id}
+          canUpload={Boolean(assignment)}
+          canDelete={Boolean(assignment)}
+          title="Aula virtual"
+          description="Carga separatas, guias, indicaciones y otros archivos para este salon."
+          emptyMessage="Aun no hay archivos cargados en este salon."
+        />
       ) : null}
 
       {assignment ? <TeacherPracticesPanel assignment={assignment} /> : null}

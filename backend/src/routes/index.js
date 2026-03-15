@@ -16,6 +16,7 @@ const teachersRoutes = require('./teachers.routes');
 const dashboardRoutes = require('./dashboard.routes');
 const forumRoutes = require('./forum.routes');
 const practicesRoutes = require('./practices.routes');
+const courseLibraryRoutes = require('./courseLibrary.routes');
 
 const router = express.Router();
 
@@ -35,6 +36,7 @@ router.use('/academic', academicRoutes);
 router.use('/teachers', teachersRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/forum', forumRoutes);
+router.use('/course-library', courseLibraryRoutes);
 router.use('/', practicesRoutes);
 
 module.exports = router;

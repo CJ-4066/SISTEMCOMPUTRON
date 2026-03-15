@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import StudentPracticesPanel from '../components/StudentPracticesPanel';
+import CourseResourcesPanel from '../components/CourseResourcesPanel';
 
 const emptyTopicForm = {
   title: '',
@@ -350,7 +351,9 @@ export default function StudentCourseWorkspacePage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-primary-900">Salón del curso</h1>
-          <p className="text-sm text-primary-700">Espacio para consultar asistencia, resolver practicas y participar en el foro.</p>
+          <p className="text-sm text-primary-700">
+            Espacio para consultar archivos, asistencia, practicas y participar en el foro.
+          </p>
         </div>
         <Link
           to="/courses"
@@ -384,6 +387,15 @@ export default function StudentCourseWorkspacePage() {
             </p>
           </div>
         </article>
+      ) : null}
+
+      {assignment ? (
+        <CourseResourcesPanel
+          assignmentId={assignment.assignment_id}
+          title="Aula virtual"
+          description="Archivos compartidos por el docente para este salon."
+          emptyMessage="El docente aun no ha cargado archivos en este salon."
+        />
       ) : null}
 
       {assignment ? <StudentPracticesPanel assignment={assignment} /> : null}

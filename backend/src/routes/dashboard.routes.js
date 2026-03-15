@@ -9,6 +9,8 @@ const { parseCampusScopeId } = require('../utils/campusScope');
 
 const router = express.Router();
 
+const DASHBOARD_TREND_DAYS = 7;
+
 router.use(authenticate);
 
 router.get(
@@ -39,6 +41,12 @@ router.get(
       },
       recent_payments: [],
       morosity: [],
+      charts: {
+        payment_status: [],
+        payment_methods: [],
+        payments_by_day: [],
+        morosity_by_campus: [],
+      },
       visibility: {
         students: canViewStudents,
         courses: canViewCourses,
@@ -121,6 +129,72 @@ router.get(
           summary.recent_payments = result.rows;
         }),
       );
+
+      tasks.push(
+        query(
+          `SELECT
+             p.status,
+             COUNT(*)::int AS total,
+             COALESCE(SUM(p.total_amount), 0)::numeric(12,2) AS amount
+           FROM payments p
+           JOIN enrollments e ON e.id = p.enrollment_id
+           JOIN course_campus cc ON cc.id = e.course_campus_id
+           WHERE ($1::bigint IS NULL OR cc.campus_id = $1)
+           GROUP BY p.status
+           ORDER BY COUNT(*) DESC, p.status ASC`,
+          [campusScopeId],
+        ).then((result) => {
+          summary.charts.payment_status = result.rows;
+        }),
+      );
+
+      tasks.push(
+        query(
+          `SELECT
+             p.method,
+             COUNT(*)::int AS total,
+             COALESCE(SUM(p.total_amount), 0)::numeric(12,2) AS amount
+           FROM payments p
+           JOIN enrollments e ON e.id = p.enrollment_id
+           JOIN course_campus cc ON cc.id = e.course_campus_id
+           WHERE ($1::bigint IS NULL OR cc.campus_id = $1)
+           GROUP BY p.method
+           ORDER BY COALESCE(SUM(p.total_amount), 0) DESC, p.method ASC`,
+          [campusScopeId],
+        ).then((result) => {
+          summary.charts.payment_methods = result.rows;
+        }),
+      );
+
+      tasks.push(
+        query(
+          `SELECT
+             days.day::date AS payment_date,
+             COUNT(filtered_payments.id)::int AS total,
+             COALESCE(
+               SUM(CASE WHEN filtered_payments.status = 'COMPLETED' THEN filtered_payments.total_amount ELSE 0 END),
+               0
+             )::numeric(12,2) AS completed_amount
+           FROM generate_series(
+             CURRENT_DATE - ($2::int - 1) * INTERVAL '1 day',
+             CURRENT_DATE,
+             INTERVAL '1 day'
+           ) AS days(day)
+           LEFT JOIN (
+             SELECT p.id, p.payment_date, p.status, p.total_amount
+             FROM payments p
+             JOIN enrollments e ON e.id = p.enrollment_id
+             JOIN course_campus cc ON cc.id = e.course_campus_id
+             WHERE ($1::bigint IS NULL OR cc.campus_id = $1)
+           ) AS filtered_payments
+             ON filtered_payments.payment_date = days.day::date
+           GROUP BY days.day
+           ORDER BY days.day ASC`,
+          [campusScopeId, DASHBOARD_TREND_DAYS],
+        ).then((result) => {
+          summary.charts.payments_by_day = result.rows;
+        }),
+      );
     }
 
     if (canViewReports) {
@@ -151,6 +225,29 @@ router.get(
           [campusScopeId],
         ).then((result) => {
           summary.morosity = result.rows;
+        }),
+      );
+
+      tasks.push(
+        query(
+          `SELECT
+             cp.id AS campus_id,
+             cp.name AS campus_name,
+             COUNT(*)::int AS installments,
+             COALESCE(SUM(i.total_amount - i.paid_amount), 0)::numeric(12,2) AS pending_amount
+           FROM installments i
+           JOIN enrollments e ON e.id = i.enrollment_id
+           JOIN course_campus cc ON cc.id = e.course_campus_id
+           JOIN campuses cp ON cp.id = cc.campus_id
+           WHERE i.due_date < CURRENT_DATE
+             AND i.status IN ('PENDING', 'PARTIAL')
+             AND ($1::bigint IS NULL OR cc.campus_id = $1)
+           GROUP BY cp.id, cp.name
+           ORDER BY pending_amount DESC, cp.name ASC
+           LIMIT 6`,
+          [campusScopeId],
+        ).then((result) => {
+          summary.charts.morosity_by_campus = result.rows;
         }),
       );
     }

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
 import { MANAGEMENT_SECTION_ITEMS, buildManagementSectionPath } from '../constants/managementSections';
+import { DASHBOARD_SECTION_ITEMS, buildDashboardSectionPath } from '../constants/dashboardSections';
 import { preloadCoreRoutes, preloadRoute } from '../utils/routePreload';
 
 const navItems = [
@@ -16,6 +17,12 @@ const navItems = [
     to: '/calendar',
     label: 'Calendario',
     permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW],
+  },
+  {
+    to: '/virtual-library',
+    label: 'Biblioteca virtual',
+    permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW],
+    adminOnly: true,
   },
   { to: '/payments', label: 'Reporte de pagos', permissions: [PERMISSIONS.PAYMENTS_VIEW] },
   {
@@ -43,6 +50,7 @@ const studentNavItems = [
 
 export default function AppShell() {
   const [open, setOpen] = useState(false);
+  const [isDashboardExpanded, setIsDashboardExpanded] = useState(false);
   const [isManagementExpanded, setIsManagementExpanded] = useState(false);
   const { user, logout, hasAnyPermission } = useAuth();
   const navigate = useNavigate();
@@ -78,10 +86,14 @@ export default function AppShell() {
   const isAlumnoProfile = roles.length === 1 && roles.includes('ALUMNO');
   const isTeacher2222 =
     user?.email?.trim().toLowerCase() === '2222@gmail.com' && roles.includes('DOCENTE');
+  const isDashboardRoute = location.pathname === '/';
   const isManagementRoute = location.pathname === '/management';
   const activeCoursesTab = location.pathname === '/courses' ? new URLSearchParams(location.search).get('tab') : null;
   const isAttendanceTabActive = activeCoursesTab === 'attendance';
   const isCourseWorkspaceRoute = location.pathname.startsWith('/courses/salon/');
+  const requestedDashboardSection = isDashboardRoute
+    ? new URLSearchParams(location.search).get('section')
+    : null;
   const requestedManagementSection = isManagementRoute
     ? new URLSearchParams(location.search).get('section')
     : null;
@@ -102,6 +114,23 @@ export default function AppShell() {
     return MANAGEMENT_SECTION_ITEMS.filter((item) => hasAnyPermission(item.permissions || []));
   }, [hasAnyPermission, isAlumnoProfile, isDocenteProfile]);
 
+  const visibleDashboardItems = useMemo(() => {
+    if (isAlumnoProfile || isTeacher2222) {
+      return [];
+    }
+
+    return DASHBOARD_SECTION_ITEMS.filter((item) => hasAnyPermission(item.permissions || []));
+  }, [hasAnyPermission, isAlumnoProfile, isTeacher2222]);
+
+  const activeDashboardSection = useMemo(() => {
+    if (!visibleDashboardItems.length) return null;
+    const requested = String(requestedDashboardSection || '').trim();
+    if (requested && visibleDashboardItems.some((item) => item.key === requested)) {
+      return requested;
+    }
+    return visibleDashboardItems[0]?.key || null;
+  }, [requestedDashboardSection, visibleDashboardItems]);
+
   const activeManagementSection = useMemo(() => {
     if (!visibleManagementItems.length) return null;
     const requested = String(requestedManagementSection || '').trim();
@@ -115,17 +144,23 @@ export default function AppShell() {
     if (isAlumnoProfile) {
       return false;
     }
+    if (item.adminOnly && isDocenteProfile) return false;
     if (item.to === '/certificates') return false;
     if (!hasAnyPermission(item.permissions || [])) return false;
     if (isTeacher2222 && item.to === '/') return false;
     if (isDocenteProfile && item.to === '/teachers') return false;
     return true;
   });
-  const dashboardItem = visibleItems.find((item) => item.to === '/') || null;
   const secondaryItems = visibleItems.filter((item) => item.to !== '/');
   const resolvedItems = isAlumnoProfile ? studentNavItems : secondaryItems;
 
   const isCertificatesRoute = location.pathname === '/certificates';
+
+  useEffect(() => {
+    if (!isDashboardRoute) {
+      setIsDashboardExpanded(false);
+    }
+  }, [isDashboardRoute]);
 
   useEffect(() => {
     if (!isManagementRoute) {
@@ -139,13 +174,28 @@ export default function AppShell() {
   };
 
   const handlePrimaryNavClick = () => {
+    setIsDashboardExpanded(false);
     setIsManagementExpanded(false);
     setOpen(false);
+  };
+
+  const handleDashboardClick = () => {
+    const nextExpanded = !isDashboardExpanded;
+    setIsDashboardExpanded(nextExpanded);
+    setIsManagementExpanded(false);
+
+    if (nextExpanded) {
+      const defaultSectionKey = activeDashboardSection || visibleDashboardItems[0]?.key;
+      if (defaultSectionKey && !isDashboardRoute) {
+        navigate(buildDashboardSectionPath(defaultSectionKey));
+      }
+    }
   };
 
   const handleManagementClick = () => {
     const nextExpanded = !isManagementExpanded;
     setIsManagementExpanded(nextExpanded);
+    setIsDashboardExpanded(false);
 
     if (nextExpanded) {
       const defaultSectionKey = activeManagementSection || visibleManagementItems[0]?.key;
@@ -192,21 +242,57 @@ export default function AppShell() {
             ))
           ) : (
             <>
-              {dashboardItem ? (
-                <NavLink
-                  to={dashboardItem.to}
-                  end
-                  onClick={handlePrimaryNavClick}
-                  onMouseEnter={() => preloadRoute(dashboardItem.to)}
-                  onFocus={() => preloadRoute(dashboardItem.to)}
-                  className={({ isActive }) =>
-                    `block rounded-xl px-3 py-2 text-sm font-medium transition ${
-                      isActive ? 'bg-primary-500 text-white' : 'text-primary-100 hover:bg-primary-800 hover:text-white'
-                    }`
-                  }
-                >
-                  {dashboardItem.label}
-                </NavLink>
+              {visibleDashboardItems.length ? (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={handleDashboardClick}
+                    onMouseEnter={() => preloadRoute('/')}
+                    onFocus={() => preloadRoute('/')}
+                    className={
+                      `block rounded-xl px-3 py-2 text-sm font-medium transition ${
+                        isDashboardRoute || isDashboardExpanded
+                          ? 'bg-primary-500 text-white'
+                          : 'text-primary-100 hover:bg-primary-800 hover:text-white'
+                      }`
+                    }
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span>Dashboard</span>
+                      <ChevronIcon className={`h-4 w-4 transition ${isDashboardExpanded ? 'rotate-180' : ''}`} />
+                    </span>
+                  </button>
+
+                  <div
+                    className={`overflow-hidden transition-all duration-200 ${
+                      isDashboardExpanded ? 'max-h-[220px] opacity-100' : 'max-h-0 opacity-0'
+                    }`}
+                  >
+                    <div className="ml-3 space-y-1 border-l border-primary-700/80 pl-3 pt-1">
+                      {visibleDashboardItems.map((item) => {
+                        const isSubItemActive = activeDashboardSection === item.key;
+                        return (
+                          <NavLink
+                            key={item.key}
+                            to={buildDashboardSectionPath(item.key)}
+                            onClick={() => setOpen(false)}
+                            onMouseEnter={() => preloadRoute('/')}
+                            onFocus={() => preloadRoute('/')}
+                            className={() =>
+                              `block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${
+                                isSubItemActive
+                                  ? 'bg-primary-800 text-white'
+                                  : 'text-primary-200 hover:bg-primary-800 hover:text-white'
+                              }`
+                            }
+                          >
+                            {item.label}
+                          </NavLink>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               ) : null}
 
               {visibleManagementItems.length ? (

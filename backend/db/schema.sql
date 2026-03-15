@@ -463,6 +463,23 @@ CREATE TABLE IF NOT EXISTS course_forum_comments (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS course_library_resources (
+  id BIGSERIAL PRIMARY KEY,
+  assignment_id BIGINT NOT NULL REFERENCES teacher_assignments(id) ON DELETE CASCADE,
+  course_campus_id BIGINT NOT NULL REFERENCES course_campus(id) ON DELETE CASCADE,
+  period_id BIGINT NOT NULL REFERENCES academic_periods(id) ON DELETE RESTRICT,
+  uploaded_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  title VARCHAR(180) NOT NULL,
+  description VARCHAR(500),
+  file_name VARCHAR(220) NOT NULL,
+  file_url TEXT NOT NULL,
+  mime_type VARCHAR(120),
+  file_size_bytes BIGINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (file_size_bytes >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS course_practices (
   id BIGSERIAL PRIMARY KEY,
   assignment_id BIGINT NOT NULL REFERENCES teacher_assignments(id) ON DELETE CASCADE,
@@ -733,6 +750,12 @@ CREATE INDEX IF NOT EXISTS idx_course_forum_topics_assignment ON course_forum_to
 CREATE INDEX IF NOT EXISTS idx_course_forum_topics_created ON course_forum_topics(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_course_forum_comments_topic ON course_forum_comments(topic_id);
 CREATE INDEX IF NOT EXISTS idx_course_forum_comments_created ON course_forum_comments(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_course_library_resources_assignment_created
+  ON course_library_resources(assignment_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_course_library_resources_course_period
+  ON course_library_resources(course_campus_id, period_id);
+CREATE INDEX IF NOT EXISTS idx_course_library_resources_uploaded_by
+  ON course_library_resources(uploaded_by_user_id);
 CREATE INDEX IF NOT EXISTS idx_course_practices_assignment_created
   ON course_practices(assignment_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_course_practices_course_period

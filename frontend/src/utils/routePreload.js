@@ -10,6 +10,7 @@ const routeLoaders = {
   '/calendar': () => import('../pages/CalendarPage'),
   '/payments': () => import('../pages/PaymentsPage'),
   '/certificate-library': () => import('../pages/CertificateLibraryPage'),
+  '/virtual-library': () => import('../pages/VirtualLibraryPage'),
   '/certificates': () => import('../pages/CertificatesPage'),
   '/users': () => import('../pages/UsersPage'),
 };
@@ -18,6 +19,7 @@ const preloadedRoutes = new Set();
 const CORE_ROUTE_PRELOAD_ORDER = [
   '/',
   '/management',
+  '/virtual-library',
   '/payments',
   '/certificate-library',
   '/users',

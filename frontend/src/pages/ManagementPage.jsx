@@ -92,7 +92,7 @@ const COURSE_DAY_OPTIONS = [
   { value: 'SAB', label: 'SAB' },
   { value: 'DOM', label: 'DOM' },
 ];
-const STUDENT_RECENT_LIMIT = 10;
+const STUDENT_PAGE_SIZE = 10;
 const ENROLLMENT_RECENT_LIMIT = 10;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -285,6 +285,8 @@ export default function ManagementPage() {
   const [activeTab, setActiveTab] = useState(() => resolveTabKey(requestedSection));
   const [, startTabTransition] = useTransition();
   const [students, setStudents] = useState([]);
+  const [studentTotal, setStudentTotal] = useState(0);
+  const [studentPage, setStudentPage] = useState(1);
   const [teachers, setTeachers] = useState([]);
   const [courses, setCourses] = useState([]);
   const [teacherTotal, setTeacherTotal] = useState(0);
@@ -340,6 +342,7 @@ export default function ManagementPage() {
   const [error, setError] = useState('');
   const [hasFullTeacherAssignmentsLoaded, setHasFullTeacherAssignmentsLoaded] = useState(false);
   const [teacherAssignmentsScopeKey, setTeacherAssignmentsScopeKey] = useState('');
+  const studentTotalPages = Math.max(1, Math.ceil(studentTotal / STUDENT_PAGE_SIZE));
   const teacherTotalPages = Math.max(1, Math.ceil(teacherTotal / teacherPageSize));
 
   const changeTab = useCallback(
@@ -385,9 +388,10 @@ export default function ManagementPage() {
   }, [isRootAdminProfile, user?.base_campus_id]);
 
   const loadStudents = useCallback(
-    async (search = '') => {
+    async ({ search = '', page = studentPage, pageSize = STUDENT_PAGE_SIZE } = {}) => {
       if (!canReadStudents) {
         setStudents([]);
+        setStudentTotal(0);
         return;
       }
 
@@ -396,18 +400,29 @@ export default function ManagementPage() {
         const response = await api.get('/students', {
           params: {
             q: search || undefined,
-            page: 1,
-            page_size: STUDENT_RECENT_LIMIT,
+            page,
+            page_size: pageSize,
           },
         });
-        setStudents(response.data?.items || []);
+        const items = response.data?.items || [];
+        const meta = response.data?.meta || {};
+        const total = Number(meta.total ?? items.length);
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+        if (page > totalPages) {
+          setStudentPage(totalPages);
+          return;
+        }
+
+        setStudents(items);
+        setStudentTotal(total);
       } catch (requestError) {
         setError(requestError.response?.data?.message || 'No se pudieron cargar los alumnos.');
       } finally {
         setLoadingStudents(false);
       }
     },
-    [canReadStudents],
+    [canReadStudents, studentPage],
   );
 
   const loadRecentEnrollments = useCallback(async () => {
@@ -621,10 +636,14 @@ export default function ManagementPage() {
   useEffect(() => {
     if (!isStudentsListTabActive) return undefined;
     const debounce = setTimeout(() => {
-      loadStudents(studentSearch.trim());
+      loadStudents({
+        search: studentSearch.trim(),
+        page: studentPage,
+        pageSize: STUDENT_PAGE_SIZE,
+      });
     }, 250);
     return () => clearTimeout(debounce);
-  }, [isStudentsListTabActive, loadStudents, studentSearch]);
+  }, [isStudentsListTabActive, loadStudents, studentPage, studentSearch]);
 
   useEffect(() => {
     if (activeTab !== 'students') return;
@@ -1411,7 +1430,14 @@ export default function ManagementPage() {
       }
 
       resetStudentForm();
-      await Promise.all([loadStudents(studentSearch.trim()), loadRecentEnrollments()]);
+      await Promise.all([
+        loadStudents({
+          search: studentSearch.trim(),
+          page: studentPage,
+          pageSize: STUDENT_PAGE_SIZE,
+        }),
+        loadRecentEnrollments(),
+      ]);
     } catch (requestError) {
       setError(requestError.response?.data?.message || requestError.message || 'No se pudo guardar el alumno.');
     } finally {
@@ -1470,7 +1496,11 @@ export default function ManagementPage() {
       await api.delete(`/students/${student.id}`);
       setMessage('Alumno eliminado correctamente.');
       if (editingStudentId === student.id) resetStudentForm();
-      await loadStudents(studentSearch.trim());
+      await loadStudents({
+        search: studentSearch.trim(),
+        page: studentPage,
+        pageSize: STUDENT_PAGE_SIZE,
+      });
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'No se pudo eliminar el alumno.');
     } finally {
@@ -1880,7 +1910,7 @@ export default function ManagementPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <span className="rounded-full bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-800">
-            {students.length} alumnos (ultimos)
+            {studentTotal || students.length} alumnos
           </span>
           <span className="rounded-full bg-accent-100 px-3 py-1 text-xs font-semibold text-accent-800">
             {teacherTotal || teachers.length} docentes
@@ -1947,7 +1977,10 @@ export default function ManagementPage() {
               className="app-input"
               placeholder="Buscar alumnos por nombre, documento o correo"
               value={studentSearch}
-              onChange={(event) => setStudentSearch(event.target.value)}
+              onChange={(event) => {
+                setStudentSearch(event.target.value);
+                setStudentPage(1);
+              }}
             />
           )}
 
@@ -2471,65 +2504,77 @@ export default function ManagementPage() {
               </p>
             )
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left text-primary-600">
-                    <th className="pb-2 pr-3">Alumno</th>
-                    <th className="pb-2 pr-3">Tipo doc.</th>
-                    <th className="pb-2 pr-3">Nro. doc.</th>
-                    <th className="pb-2 pr-3">Correo</th>
-                    <th className="pb-2 pr-3">Teléfono</th>
-                    <th className="pb-2">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {students.map((student) => {
-                    const parsedDocument = parseDocumentValue(student.document_number);
-                    return (
-                      <tr key={student.id} className="border-t border-primary-100">
-                        <td className="py-2 pr-3 font-medium">
-                          {student.first_name} {student.last_name}
-                        </td>
-                        <td className="py-2 pr-3">{parsedDocument.document_type}</td>
-                        <td className="py-2 pr-3">{parsedDocument.document_number || '-'}</td>
-                        <td className="py-2 pr-3">{student.email || '-'}</td>
-                        <td className="py-2 pr-3">{student.phone || '-'}</td>
-                        <td className="py-2">
-                          <div className="flex flex-wrap gap-2">
-                            {canManageStudents ? (
-                              <button
-                                type="button"
-                                onClick={() => editStudent(student)}
-                                className="rounded-lg border border-primary-300 px-2 py-1 text-xs font-semibold text-primary-800 hover:bg-primary-50"
-                              >
-                                EDITAR
-                              </button>
-                            ) : null}
-                            {canManageStudents ? (
-                              <button
-                                type="button"
-                                onClick={() => deleteStudent(student)}
-                                className="rounded-lg border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
-                              >
-                                ELIMINAR
-                              </button>
-                            ) : null}
-                          </div>
+            <>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-primary-600">
+                      <th className="pb-2 pr-3">Alumno</th>
+                      <th className="pb-2 pr-3">Tipo doc.</th>
+                      <th className="pb-2 pr-3">Nro. doc.</th>
+                      <th className="pb-2 pr-3">Correo</th>
+                      <th className="pb-2 pr-3">Teléfono</th>
+                      <th className="pb-2">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {students.map((student) => {
+                      const parsedDocument = parseDocumentValue(student.document_number);
+                      return (
+                        <tr key={student.id} className="border-t border-primary-100">
+                          <td className="py-2 pr-3 font-medium">
+                            {student.first_name} {student.last_name}
+                          </td>
+                          <td className="py-2 pr-3">{parsedDocument.document_type}</td>
+                          <td className="py-2 pr-3">{parsedDocument.document_number || '-'}</td>
+                          <td className="py-2 pr-3">{student.email || '-'}</td>
+                          <td className="py-2 pr-3">{student.phone || '-'}</td>
+                          <td className="py-2">
+                            <div className="flex flex-wrap gap-2">
+                              {canManageStudents ? (
+                                <button
+                                  type="button"
+                                  onClick={() => editStudent(student)}
+                                  className="rounded-lg border border-primary-300 px-2 py-1 text-xs font-semibold text-primary-800 hover:bg-primary-50"
+                                >
+                                  EDITAR
+                                </button>
+                              ) : null}
+                              {canManageStudents ? (
+                                <button
+                                  type="button"
+                                  onClick={() => deleteStudent(student)}
+                                  className="rounded-lg border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
+                                >
+                                  ELIMINAR
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!loadingStudents && students.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-4 text-center text-sm text-primary-600">
+                          No se encontraron alumnos.
                         </td>
                       </tr>
-                    );
-                  })}
-                  {!loadingStudents && students.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-4 text-center text-sm text-primary-600">
-                        No se encontraron alumnos.
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+
+              <PaginationControls
+                page={studentPage}
+                totalPages={studentTotalPages}
+                total={studentTotal}
+                pageSize={STUDENT_PAGE_SIZE}
+                onPageChange={setStudentPage}
+                disabled={loadingStudents}
+                label="alumnos"
+              />
+            </>
           )}
         </article>
       ) : null}

@@ -331,6 +331,60 @@ const ensureCourseForumTables = async () => {
   );
 };
 
+const ensureCourseLibraryTables = async () => {
+  const assignmentsExistsResult = await query(
+    `SELECT to_regclass('public.teacher_assignments') AS table_name`,
+  );
+  const assignmentsExists = Boolean(assignmentsExistsResult.rows[0]?.table_name);
+
+  if (!assignmentsExists) {
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS course_library_resources (
+      id BIGSERIAL PRIMARY KEY,
+      assignment_id BIGINT NOT NULL REFERENCES teacher_assignments(id) ON DELETE CASCADE,
+      course_campus_id BIGINT NOT NULL REFERENCES course_campus(id) ON DELETE CASCADE,
+      period_id BIGINT NOT NULL REFERENCES academic_periods(id) ON DELETE RESTRICT,
+      uploaded_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      title VARCHAR(180) NOT NULL,
+      description VARCHAR(500),
+      file_name VARCHAR(220) NOT NULL,
+      file_url TEXT NOT NULL,
+      mime_type VARCHAR(120),
+      file_size_bytes BIGINT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (file_size_bytes >= 0)
+    )
+  `);
+
+  await query(
+    `ALTER TABLE course_library_resources
+     ADD COLUMN IF NOT EXISTS uploaded_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL`,
+  );
+  await query(`ALTER TABLE course_library_resources ADD COLUMN IF NOT EXISTS description VARCHAR(500)`);
+  await query(`ALTER TABLE course_library_resources ADD COLUMN IF NOT EXISTS mime_type VARCHAR(120)`);
+  await query(`ALTER TABLE course_library_resources ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT`);
+  await query(`UPDATE course_library_resources SET file_size_bytes = 0 WHERE file_size_bytes IS NULL`);
+  await query(`ALTER TABLE course_library_resources ALTER COLUMN file_size_bytes SET DEFAULT 0`);
+  await query(`ALTER TABLE course_library_resources ALTER COLUMN file_size_bytes SET NOT NULL`);
+
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_course_library_resources_assignment_created
+     ON course_library_resources(assignment_id, created_at DESC)`,
+  );
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_course_library_resources_course_period
+     ON course_library_resources(course_campus_id, period_id)`,
+  );
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_course_library_resources_uploaded_by
+     ON course_library_resources(uploaded_by_user_id)`,
+  );
+};
+
 const ensureCoursePracticesTables = async () => {
   const assignmentsExistsResult = await query(
     `SELECT to_regclass('public.teacher_assignments') AS table_name`,
@@ -923,6 +977,7 @@ const runBootMigrations = async () => {
   await ensureTeacherAssignmentOverrideColumns();
   await ensureTeacherCalendarEvents();
   await ensureCourseForumTables();
+  await ensureCourseLibraryTables();
   await ensureCoursePracticesTables();
   await ensureAttendanceStatusConstraint();
   await ensurePermissionsModel();
