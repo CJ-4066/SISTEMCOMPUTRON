@@ -11,7 +11,7 @@ const parsePositiveNumber = (rawValue, fallback, envName) => {
   return parsed;
 };
 
-const rawFrontendUrls = process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:5173';
+const rawFrontendUrls = process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:8100';
 
 const frontendUrls = rawFrontendUrls
   .split(',')
@@ -20,17 +20,17 @@ const frontendUrls = rawFrontendUrls
 
 if ((process.env.NODE_ENV || 'development') !== 'production') {
   frontendUrls.push(
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:5174',
+    'http://localhost:8100',
+    'http://localhost:8101',
+    'http://127.0.0.1:8100',
+    'http://127.0.0.1:8101',
   );
 }
 
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
-  port: parsePositiveNumber(process.env.PORT, 4000, 'PORT'),
-  frontendUrl: frontendUrls[0] || 'http://localhost:5173',
+  port: parsePositiveNumber(process.env.PORT, 4010, 'PORT'),
+  frontendUrl: frontendUrls[0] || 'http://localhost:8100',
   frontendUrls: Array.from(new Set(frontendUrls)),
   db: {
     host: process.env.DB_HOST || 'localhost',

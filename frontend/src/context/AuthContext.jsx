@@ -149,7 +149,7 @@ export function AuthProvider({ children }) {
       const message =
         rateLimitMessage ||
         responseMessage ||
-        'No se pudo conectar con la API. Verifica que el backend esté activo y que el proxy de Vite apunte a http://localhost:4000';
+        'No se pudo conectar con la API. Verifica que el backend esté activo y que el proxy de Vite apunte a http://localhost:4010';
       return { ok: false, message };
     } finally {
       setLoading(false);

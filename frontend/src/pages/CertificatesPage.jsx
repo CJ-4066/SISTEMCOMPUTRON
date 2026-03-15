@@ -1,11 +1,7 @@
-import { useMemo } from 'react';
-
 export default function CertificatesPage() {
-  const certificateVersion = useMemo(() => `2026-03-05-${Date.now()}`, []);
-  const certificateUrl = useMemo(() => `/certificado.html?v=${certificateVersion}`, [certificateVersion]);
-
   const openGenerator = () => {
-    window.open(certificateUrl, '_blank', 'noopener,noreferrer');
+    const version = Date.now();
+    window.open(`/certificado-pdf.html?v=${version}`, '_blank', 'noopener,noreferrer');
   };
 
   return (

@@ -2,27 +2,11 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
+import { MANAGEMENT_SECTION_ITEMS, buildManagementSectionPath } from '../constants/managementSections';
 import { preloadCoreRoutes, preloadRoute } from '../utils/routePreload';
 
 const navItems = [
   { to: '/', label: 'Dashboard', permissions: [PERMISSIONS.DASHBOARD_VIEW] },
-  {
-    to: '/management',
-    label: 'Gestión académica',
-    permissions: [
-      PERMISSIONS.STUDENTS_VIEW,
-      PERMISSIONS.STUDENTS_MANAGE,
-      PERMISSIONS.TEACHERS_VIEW,
-      PERMISSIONS.COURSES_VIEW,
-      PERMISSIONS.COURSES_MANAGE,
-      PERMISSIONS.CAMPUSES_VIEW,
-      PERMISSIONS.CAMPUSES_MANAGE,
-      PERMISSIONS.PERIODS_VIEW,
-      PERMISSIONS.PERIODS_MANAGE,
-      PERMISSIONS.PAYMENTS_VIEW,
-      PERMISSIONS.PAYMENTS_MANAGE,
-    ],
-  },
   {
     to: '/courses?tab=attendance',
     label: 'Asistencias',
@@ -43,6 +27,12 @@ const navItems = [
   { to: '/users', label: 'Usuarios', permissions: [PERMISSIONS.USERS_VIEW] },
 ];
 
+const ChevronIcon = ({ className = '' }) => (
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+    <path d="m6 8 4 4 4-4" />
+  </svg>
+);
+
 const studentNavItems = [
   { to: '/courses', label: 'Mis cursos' },
   { to: '/my-grades', label: 'Mis notas' },
@@ -53,6 +43,7 @@ const studentNavItems = [
 
 export default function AppShell() {
   const [open, setOpen] = useState(false);
+  const [isManagementExpanded, setIsManagementExpanded] = useState(false);
   const { user, logout, hasAnyPermission } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -87,9 +78,13 @@ export default function AppShell() {
   const isAlumnoProfile = roles.length === 1 && roles.includes('ALUMNO');
   const isTeacher2222 =
     user?.email?.trim().toLowerCase() === '2222@gmail.com' && roles.includes('DOCENTE');
+  const isManagementRoute = location.pathname === '/management';
   const activeCoursesTab = location.pathname === '/courses' ? new URLSearchParams(location.search).get('tab') : null;
   const isAttendanceTabActive = activeCoursesTab === 'attendance';
   const isCourseWorkspaceRoute = location.pathname.startsWith('/courses/salon/');
+  const requestedManagementSection = isManagementRoute
+    ? new URLSearchParams(location.search).get('section')
+    : null;
 
   const isNavItemActive = (itemPath, pathActive) => {
     if (itemPath === '/courses?tab=attendance') {
@@ -99,24 +94,65 @@ export default function AppShell() {
     return pathActive;
   };
 
+  const visibleManagementItems = useMemo(() => {
+    if (isAlumnoProfile || isDocenteProfile) {
+      return [];
+    }
+
+    return MANAGEMENT_SECTION_ITEMS.filter((item) => hasAnyPermission(item.permissions || []));
+  }, [hasAnyPermission, isAlumnoProfile, isDocenteProfile]);
+
+  const activeManagementSection = useMemo(() => {
+    if (!visibleManagementItems.length) return null;
+    const requested = String(requestedManagementSection || '').trim();
+    if (requested && visibleManagementItems.some((item) => item.key === requested)) {
+      return requested;
+    }
+    return visibleManagementItems[0]?.key || null;
+  }, [requestedManagementSection, visibleManagementItems]);
+
   const visibleItems = navItems.filter((item) => {
     if (isAlumnoProfile) {
       return false;
     }
     if (item.to === '/certificates') return false;
     if (!hasAnyPermission(item.permissions || [])) return false;
-    if (isDocenteProfile && item.to === '/management') return false;
     if (isTeacher2222 && item.to === '/') return false;
     if (isDocenteProfile && item.to === '/teachers') return false;
     return true;
   });
-  const resolvedItems = isAlumnoProfile ? studentNavItems : visibleItems;
+  const dashboardItem = visibleItems.find((item) => item.to === '/') || null;
+  const secondaryItems = visibleItems.filter((item) => item.to !== '/');
+  const resolvedItems = isAlumnoProfile ? studentNavItems : secondaryItems;
 
   const isCertificatesRoute = location.pathname === '/certificates';
+
+  useEffect(() => {
+    if (!isManagementRoute) {
+      setIsManagementExpanded(false);
+    }
+  }, [isManagementRoute]);
 
   const handleLogout = async () => {
     await logout();
     navigate('/login');
+  };
+
+  const handlePrimaryNavClick = () => {
+    setIsManagementExpanded(false);
+    setOpen(false);
+  };
+
+  const handleManagementClick = () => {
+    const nextExpanded = !isManagementExpanded;
+    setIsManagementExpanded(nextExpanded);
+
+    if (nextExpanded) {
+      const defaultSectionKey = activeManagementSection || visibleManagementItems[0]?.key;
+      if (defaultSectionKey && !isManagementRoute) {
+        navigate(buildManagementSectionPath(defaultSectionKey));
+      }
+    }
   };
 
   return (
@@ -134,25 +170,119 @@ export default function AppShell() {
         </div>
 
         <nav className="space-y-1 p-3">
-          {resolvedItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
-              onClick={() => setOpen(false)}
-              onMouseEnter={() => preloadRoute(item.to)}
-              onFocus={() => preloadRoute(item.to)}
-              className={({ isActive }) =>
-                `block rounded-xl px-3 py-2 text-sm font-medium transition ${
-                  isNavItemActive(item.to, isActive)
-                    ? 'bg-primary-500 text-white'
-                    : 'text-primary-100 hover:bg-primary-800 hover:text-white'
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
+          {isAlumnoProfile ? (
+            resolvedItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === '/'}
+                onClick={handlePrimaryNavClick}
+                onMouseEnter={() => preloadRoute(item.to)}
+                onFocus={() => preloadRoute(item.to)}
+                className={({ isActive }) =>
+                  `block rounded-xl px-3 py-2 text-sm font-medium transition ${
+                    isNavItemActive(item.to, isActive)
+                      ? 'bg-primary-500 text-white'
+                      : 'text-primary-100 hover:bg-primary-800 hover:text-white'
+                  }`
+                }
+              >
+                {item.label}
+              </NavLink>
+            ))
+          ) : (
+            <>
+              {dashboardItem ? (
+                <NavLink
+                  to={dashboardItem.to}
+                  end
+                  onClick={handlePrimaryNavClick}
+                  onMouseEnter={() => preloadRoute(dashboardItem.to)}
+                  onFocus={() => preloadRoute(dashboardItem.to)}
+                  className={({ isActive }) =>
+                    `block rounded-xl px-3 py-2 text-sm font-medium transition ${
+                      isActive ? 'bg-primary-500 text-white' : 'text-primary-100 hover:bg-primary-800 hover:text-white'
+                    }`
+                  }
+                >
+                  {dashboardItem.label}
+                </NavLink>
+              ) : null}
+
+              {visibleManagementItems.length ? (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={handleManagementClick}
+                    onMouseEnter={() => preloadRoute('/management')}
+                    onFocus={() => preloadRoute('/management')}
+                    className={
+                      `block rounded-xl px-3 py-2 text-sm font-medium transition ${
+                        isManagementRoute || isManagementExpanded
+                          ? 'bg-primary-500 text-white'
+                          : 'text-primary-100 hover:bg-primary-800 hover:text-white'
+                      }`
+                    }
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span>Gestión académica</span>
+                      <ChevronIcon className={`h-4 w-4 transition ${isManagementExpanded ? 'rotate-180' : ''}`} />
+                    </span>
+                  </button>
+
+                  <div
+                    className={`overflow-hidden transition-all duration-200 ${
+                      isManagementExpanded ? 'max-h-[420px] opacity-100' : 'max-h-0 opacity-0'
+                    }`}
+                  >
+                    <div className="ml-3 space-y-1 border-l border-primary-700/80 pl-3 pt-1">
+                      {visibleManagementItems.map((item) => {
+                        const isSubItemActive = activeManagementSection === item.key;
+                        return (
+                          <NavLink
+                            key={item.key}
+                            to={buildManagementSectionPath(item.key)}
+                            onClick={() => setOpen(false)}
+                            onMouseEnter={() => preloadRoute('/management')}
+                            onFocus={() => preloadRoute('/management')}
+                            className={() =>
+                              `block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${
+                                isSubItemActive
+                                  ? 'bg-primary-800 text-white'
+                                  : 'text-primary-200 hover:bg-primary-800 hover:text-white'
+                              }`
+                            }
+                          >
+                            {item.label}
+                          </NavLink>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {resolvedItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === '/'}
+                  onClick={handlePrimaryNavClick}
+                  onMouseEnter={() => preloadRoute(item.to)}
+                  onFocus={() => preloadRoute(item.to)}
+                  className={({ isActive }) =>
+                    `block rounded-xl px-3 py-2 text-sm font-medium transition ${
+                      isNavItemActive(item.to, isActive)
+                        ? 'bg-primary-500 text-white'
+                        : 'text-primary-100 hover:bg-primary-800 hover:text-white'
+                    }`
+                  }
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </>
+          )}
         </nav>
 
         <div className="absolute bottom-0 w-full border-t border-primary-700 p-3">

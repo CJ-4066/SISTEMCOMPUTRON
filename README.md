@@ -52,7 +52,7 @@ npm run db:init
 npm run dev
 ```
 
-API: `http://localhost:4000/api`
+API: `http://localhost:4010/api`
 
 ### 3) Frontend
 
@@ -63,7 +63,7 @@ npm install
 npm run dev
 ```
 
-Web: `http://localhost:5173`
+Web: `http://localhost:8100`
 
 ### Alternativa: levantar todo desde la raíz
 
@@ -79,7 +79,7 @@ npm run dev
 El primer registro puede crearse sin token; desde el segundo usuario, solo `ADMIN` puede registrar usuarios.
 
 ```bash
-curl -X POST http://localhost:4000/api/auth/register \
+curl -X POST http://localhost:4010/api/auth/register \
   -H 'Content-Type: application/json' \
   -d '{
     "first_name":"Admin",
@@ -124,7 +124,7 @@ Luego inicia sesión en el frontend con ese usuario.
 4. Ejecutar backend con PM2 (`pm2 start src/server.js --name computron-api`).
 5. Configurar reverse proxy de Nginx:
    - `https://tudominio.com` -> frontend estático
-   - `https://tudominio.com/api` -> backend `localhost:4000`
+   - `https://tudominio.com/api` -> backend `localhost:4010`
 6. Activar SSL con Let's Encrypt (`certbot`).
 
 ## Seguridad recomendada para producción

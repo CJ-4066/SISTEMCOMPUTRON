@@ -7,9 +7,6 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>Generador de Certificados</title>
-    <script>
-      window.location.replace(`/certificado-pdf.html${window.location.search}${window.location.hash}`);
-    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -142,6 +139,12 @@
 
       button:hover {
         transform: translateY(-1px);
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.72;
+        transform: none;
       }
 
       .btn-primary {
@@ -615,7 +618,7 @@
   <body>
     <div class="embed-toolbar">
       <button class="btn-secondary" type="button" id="openControlsButton">Editar datos</button>
-      <button class="btn-primary" type="button" id="embedPrintButton">Imprimir</button>
+      <button class="btn-primary" type="button" id="embedPrintButton">Descargar PDF</button>
     </div>
     <div class="embed-backdrop" id="embedBackdrop"></div>
     <div class="app">
@@ -623,8 +626,8 @@
         <button class="btn-secondary controls-close" type="button" id="closeControlsButton">Cerrar panel</button>
         <h1>Generador de Certificado</h1>
         <p>
-          Completa los datos del alumno y el curso. La plantilla oficial ya está fijada por defecto; luego exporta el
-          certificado con imprimir o guardar como PDF.
+          Completa los datos del alumno y el curso. La plantilla oficial ya está fijada por defecto; luego descarga el
+          certificado directamente en PDF.
         </p>
 
         <form id="certificateForm">
@@ -693,7 +696,7 @@
         </form>
 
         <div class="actions">
-          <button class="btn-primary" type="button" id="printButton">Imprimir o guardar PDF</button>
+          <button class="btn-primary" type="button" id="printButton">Descargar PDF</button>
           <button class="btn-secondary" type="button" id="demoButton">Cargar ejemplo</button>
           <button class="btn-secondary" type="button" id="clearButton">Limpiar campos</button>
         </div>
@@ -757,7 +760,10 @@
       </main>
     </div>
 
-    <script>
+    <script type="module">
+      import html2canvas from "html2canvas";
+      import { jsPDF } from "jspdf";
+
       (() => {
         const queryParams = new URLSearchParams(window.location.search);
         const isEmbedded = queryParams.get("embed") === "1";
@@ -770,9 +776,11 @@
         const closeControlsButton = document.getElementById("closeControlsButton");
         const embedBackdrop = document.getElementById("embedBackdrop");
         const embedPrintButton = document.getElementById("embedPrintButton");
+        const printButton = document.getElementById("printButton");
 
         const state = {
-          photoObjectUrl: null
+          photoObjectUrl: null,
+          exportingPdf: false
         };
         const AUTH_STORAGE_KEY = "computron_auth";
 
@@ -851,6 +859,123 @@
             body: JSON.stringify(payload),
             keepalive: true
           }).catch(() => {});
+        };
+
+        const waitForImage = (imageElement) => {
+          if (!imageElement) return Promise.resolve();
+          const currentSrc = imageElement.currentSrc || imageElement.src;
+          if (!currentSrc) return Promise.resolve();
+          if (imageElement.complete && imageElement.naturalWidth > 0) {
+            return Promise.resolve();
+          }
+
+          return new Promise((resolve) => {
+            const handleReady = () => {
+              imageElement.removeEventListener("load", handleReady);
+              imageElement.removeEventListener("error", handleReady);
+              resolve();
+            };
+
+            imageElement.addEventListener("load", handleReady, { once: true });
+            imageElement.addEventListener("error", handleReady, { once: true });
+          });
+        };
+
+        const waitForRenderFrame = () =>
+          new Promise((resolve) => {
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(resolve);
+            });
+          });
+
+        const sanitizeFileName = (value) =>
+          String(value || "")
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-zA-Z0-9_-]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 80);
+
+        const buildPdfFileName = () => {
+          const certificateCode = sanitizeFileName(getInputValue("certCodeInput"));
+          const studentName = sanitizeFileName(getInputValue("studentNameInput"));
+
+          if (certificateCode) {
+            return `certificado-${certificateCode}`;
+          }
+
+          if (studentName) {
+            return `certificado-${studentName}`;
+          }
+
+          return "certificado-computron";
+        };
+
+        const setPdfButtonsBusy = (isBusy) => {
+          [printButton, embedPrintButton].filter(Boolean).forEach((button) => {
+            if (!button.dataset.defaultLabel) {
+              button.dataset.defaultLabel = button.textContent || "Descargar PDF";
+            }
+            button.disabled = isBusy;
+            button.textContent = isBusy ? "Generando PDF..." : button.dataset.defaultLabel;
+          });
+        };
+
+        const exportCertificatePdf = async () => {
+          if (state.exportingPdf) return;
+
+          state.exportingPdf = true;
+          setPdfButtonsBusy(true);
+
+          try {
+            updatePreview();
+            await Promise.all([
+              document.fonts?.ready || Promise.resolve(),
+              waitForImage(templateImage),
+              waitForImage(photoView)
+            ]);
+            await waitForRenderFrame();
+
+            const canvas = await html2canvas(certificateSheet, {
+              scale: Math.max(2, window.devicePixelRatio || 1),
+              useCORS: true,
+              backgroundColor: "#ffffff",
+              logging: false,
+              onclone: (clonedDocument) => {
+                const clonedSheet = clonedDocument.getElementById("certificateSheet");
+                if (clonedSheet) {
+                  clonedSheet.style.boxShadow = "none";
+                  clonedSheet.style.borderRadius = "0";
+                }
+              }
+            });
+
+            const pdf = new jsPDF({
+              orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
+              unit: "px",
+              format: [canvas.width, canvas.height],
+              compress: true
+            });
+
+            pdf.addImage(
+              canvas.toDataURL("image/png"),
+              "PNG",
+              0,
+              0,
+              canvas.width,
+              canvas.height,
+              undefined,
+              "FAST"
+            );
+            pdf.save(`${buildPdfFileName()}.pdf`);
+            registerCertificateInLibrary();
+          } catch (error) {
+            console.error("No se pudo generar el PDF del certificado:", error);
+            window.alert("No se pudo generar el PDF. Intenta nuevamente.");
+          } finally {
+            state.exportingPdf = false;
+            setPdfButtonsBusy(false);
+          }
         };
 
         const formatDateShort = (isoDate) => {
@@ -1042,14 +1167,12 @@
           updatePreview();
         });
 
-        document.getElementById("printButton").addEventListener("click", () => {
-          registerCertificateInLibrary();
-          window.print();
+        printButton.addEventListener("click", () => {
+          exportCertificatePdf();
         });
 
         embedPrintButton?.addEventListener("click", () => {
-          registerCertificateInLibrary();
-          window.print();
+          exportCertificatePdf();
         });
 
         document.getElementById("demoButton").addEventListener("click", () => {

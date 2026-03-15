@@ -1,6 +1,8 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState, useTransition } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { MANAGEMENT_SECTION_ITEMS } from '../constants/managementSections';
 import { PERMISSIONS } from '../constants/permissions';
 import { buildDocumentValue, DOCUMENT_TYPE_OPTIONS, parseDocumentValue } from '../utils/document';
 import PaginationControls from '../components/PaginationControls';
@@ -211,6 +213,7 @@ const timeToMinutes = (value) => {
 
 export default function ManagementPage() {
   const { user, hasPermission } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const canViewStudents = hasPermission(PERMISSIONS.STUDENTS_VIEW);
   const canManageStudents = hasPermission(PERMISSIONS.STUDENTS_MANAGE);
@@ -244,23 +247,42 @@ export default function ManagementPage() {
   const isRootAdminProfile = userRoles.includes('ADMIN') && !user?.base_campus_id;
   const canSelectEnrollmentCampus = Boolean(isRootAdminProfile && canManageEnrollments);
 
-  const tabs = useMemo(
-    () => [
-      { key: 'students', label: 'Matrícula', enabled: canReadStudents },
-      { key: 'students_list', label: 'Alumnos', enabled: canReadStudents },
-      { key: 'teachers', label: 'Docentes', enabled: canReadTeachers },
-      { key: 'courses', label: 'Cursos', enabled: canReadCoursesModule },
-      { key: 'campuses', label: 'Sedes', enabled: canReadCampuses },
-      { key: 'periods', label: 'Periodos', enabled: canReadPeriods },
-      { key: 'payments', label: 'Pagos', enabled: canReadPayments },
-      { key: 'certificates', label: 'Certificados', enabled: canReadPayments },
-    ],
+  const sectionAccess = useMemo(
+    () => ({
+      students: canReadStudents,
+      students_list: canReadStudents,
+      teachers: canReadTeachers,
+      courses: canReadCoursesModule,
+      campuses: canReadCampuses,
+      periods: canReadPeriods,
+      payments: canReadPayments,
+      certificates: canReadPayments,
+    }),
     [canReadCampuses, canReadCoursesModule, canReadPayments, canReadPeriods, canReadStudents, canReadTeachers],
   );
 
-  const firstEnabledTab = tabs.find((tab) => tab.enabled)?.key || null;
+  const tabs = useMemo(
+    () =>
+      MANAGEMENT_SECTION_ITEMS.map((item) => ({
+        ...item,
+        enabled: Boolean(sectionAccess[item.key]),
+      })),
+    [sectionAccess],
+  );
 
-  const [activeTab, setActiveTab] = useState(firstEnabledTab);
+  const firstEnabledTab = tabs.find((tab) => tab.enabled)?.key || null;
+  const requestedSection = searchParams.get('section');
+  const resolveTabKey = useCallback(
+    (candidateKey) => {
+      const normalizedCandidate = String(candidateKey || '').trim();
+      if (normalizedCandidate && tabs.some((tab) => tab.key === normalizedCandidate && tab.enabled)) {
+        return normalizedCandidate;
+      }
+      return firstEnabledTab;
+    },
+    [firstEnabledTab, tabs],
+  );
+  const [activeTab, setActiveTab] = useState(() => resolveTabKey(requestedSection));
   const [, startTabTransition] = useTransition();
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -320,15 +342,41 @@ export default function ManagementPage() {
   const [teacherAssignmentsScopeKey, setTeacherAssignmentsScopeKey] = useState('');
   const teacherTotalPages = Math.max(1, Math.ceil(teacherTotal / teacherPageSize));
 
-  const changeTab = (nextTab) => {
-    startTabTransition(() => setActiveTab(nextTab));
-  };
+  const changeTab = useCallback(
+    (nextTab, { replace = false } = {}) => {
+      const resolvedTab = resolveTabKey(nextTab);
+      startTabTransition(() => setActiveTab(resolvedTab));
+
+      const nextParams = new URLSearchParams(searchParams);
+      if (resolvedTab) {
+        nextParams.set('section', resolvedTab);
+      } else {
+        nextParams.delete('section');
+      }
+
+      setSearchParams(nextParams, { replace });
+    },
+    [resolveTabKey, searchParams, setSearchParams],
+  );
 
   useEffect(() => {
-    if (!tabs.find((tab) => tab.key === activeTab && tab.enabled)) {
-      setActiveTab(firstEnabledTab);
+    const resolvedTab = resolveTabKey(requestedSection);
+
+    if (resolvedTab !== activeTab) {
+      startTabTransition(() => setActiveTab(resolvedTab));
+      return;
     }
-  }, [activeTab, firstEnabledTab, tabs]);
+
+    if (resolvedTab !== requestedSection) {
+      const nextParams = new URLSearchParams(searchParams);
+      if (resolvedTab) {
+        nextParams.set('section', resolvedTab);
+      } else {
+        nextParams.delete('section');
+      }
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [activeTab, requestedSection, resolveTabKey, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!isRootAdminProfile && user?.base_campus_id) {
@@ -1808,7 +1856,7 @@ export default function ManagementPage() {
 
   const openCertificateGenerator = () => {
     const version = Date.now();
-    window.open(`/certificado.html?v=${version}`, '_blank', 'noopener,noreferrer');
+    window.open(`/certificado-pdf.html?v=${version}`, '_blank', 'noopener,noreferrer');
   };
 
 

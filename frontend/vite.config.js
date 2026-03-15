@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -17,13 +19,14 @@ const parseCsv = (value = '') =>
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
-  const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://localhost:4000';
+  const rootDir = fileURLToPath(new URL('.', import.meta.url));
+  const env = loadEnv(mode, rootDir, '');
+  const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://localhost:4010';
   const allowedHosts = parseCsv(env.VITE_ALLOWED_HOSTS || env.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS);
 
   const serverConfig = {
     host: true,
-    port: 5173,
+    port: 8100,
     strictPort: true,
     proxy: buildProxyConfig(proxyTarget),
     ...(allowedHosts.length ? { allowedHosts } : {}),
@@ -31,6 +34,14 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        input: {
+          main: resolve(rootDir, 'index.html'),
+          certificadoPdf: resolve(rootDir, 'certificado-pdf.html'),
+        },
+      },
+    },
     server: serverConfig,
     preview: {
       host: true,

@@ -222,14 +222,50 @@ const getRequestProtocol = (req) => {
   return req.protocol || 'http';
 };
 
+const getFrontendOrigin = (req) => {
+  const headerCandidates = [
+    req.headers['x-frontend-origin'],
+    req.headers.origin,
+    req.headers.referer,
+  ];
+
+  for (const candidate of headerCandidates) {
+    const rawValue = Array.isArray(candidate) ? candidate[0] : candidate;
+    if (typeof rawValue !== 'string' || !rawValue.trim()) continue;
+
+    try {
+      const parsed = new URL(rawValue.trim());
+      if (!['http:', 'https:'].includes(parsed.protocol)) continue;
+      return parsed.origin;
+    } catch (_error) {
+      continue;
+    }
+  }
+
+  return '';
+};
+
+const buildFrontendAwareAbsoluteUrl = (req, relativePath) => {
+  const normalizedRelativePath = String(relativePath || '').trim();
+  if (!normalizedRelativePath) return '';
+
+  const frontendOrigin = getFrontendOrigin(req);
+  if (frontendOrigin) {
+    return `${frontendOrigin}${normalizedRelativePath}`;
+  }
+
+  const host = req.get('host');
+  if (!host) {
+    return normalizedRelativePath;
+  }
+
+  return `${getRequestProtocol(req)}://${host}${normalizedRelativePath}`;
+};
+
 const buildPaymentEvidenceUrl = (req, fileName) => {
   const encodedFileName = encodeURIComponent(fileName);
-  const host = req.get('host');
   const relativeUrl = `/api/uploads/payments/${encodedFileName}`;
-  if (!host) {
-    return relativeUrl;
-  }
-  return `${getRequestProtocol(req)}://${host}${relativeUrl}`;
+  return buildFrontendAwareAbsoluteUrl(req, relativeUrl);
 };
 
 const generateReceiptToken = () => crypto.randomBytes(16).toString('hex');
@@ -247,11 +283,7 @@ const buildReceiptVerificationPath = (receiptToken, format) => {
 
 const buildReceiptVerificationUrl = (req, receiptToken, format) => {
   const relativePath = buildReceiptVerificationPath(receiptToken, format);
-  const host = req.get('host');
-  if (!host) {
-    return relativePath;
-  }
-  return `${getRequestProtocol(req)}://${host}${relativePath}`;
+  return buildFrontendAwareAbsoluteUrl(req, relativePath);
 };
 
 const toDownloadFlag = (value) => {

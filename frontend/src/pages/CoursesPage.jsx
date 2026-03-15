@@ -25,7 +25,6 @@ export default function CoursesPage() {
   const [catalogCampusFilter, setCatalogCampusFilter] = useState('ALL');
   const [catalogModalityFilter, setCatalogModalityFilter] = useState('ALL');
   const [catalogSort, setCatalogSort] = useState('NAME_ASC');
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -170,7 +169,6 @@ export default function CoursesPage() {
         </div>
       </div>
 
-      {message ? <p className="rounded-xl bg-primary-50 p-3 text-sm text-primary-800">{message}</p> : null}
       {error ? <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
 
       <div className="space-y-4">

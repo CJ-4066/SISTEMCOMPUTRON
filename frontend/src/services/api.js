@@ -19,6 +19,11 @@ const AUTH_ROUTES = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/regi
 
 const isAuthRoute = (url = '') => AUTH_ROUTES.some((path) => url.includes(path));
 
+const getFrontendOriginHeader = () => {
+  if (typeof window === 'undefined' || !window.location?.origin) return '';
+  return window.location.origin;
+};
+
 const normalizeParams = (params) => {
   if (!params) return '';
 
@@ -62,11 +67,17 @@ export const configureAuthHandlers = ({
 };
 
 api.interceptors.request.use((config) => {
+  config.headers = config.headers || {};
+
   if (accessToken) {
-    config.headers = config.headers || {};
     if (!config.headers.Authorization) {
       config.headers.Authorization = `Bearer ${accessToken}`;
     }
+  }
+
+  const frontendOrigin = getFrontendOriginHeader();
+  if (frontendOrigin && !config.headers['X-Frontend-Origin']) {
+    config.headers['X-Frontend-Origin'] = frontendOrigin;
   }
 
   const method = String(config.method || 'get').toLowerCase();
