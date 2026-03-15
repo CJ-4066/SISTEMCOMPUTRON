@@ -3,6 +3,12 @@ const dotenv = require('dotenv');
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
+const parseCsvEnv = (rawValue) =>
+  String(rawValue || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+
 const parsePositiveNumber = (rawValue, fallback, envName) => {
   const parsed = Number(rawValue ?? fallback);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -12,11 +18,10 @@ const parsePositiveNumber = (rawValue, fallback, envName) => {
 };
 
 const rawFrontendUrls = process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:8100';
+const rawFrontendUrlPatterns = process.env.FRONTEND_URL_PATTERNS || process.env.FRONTEND_ORIGIN_PATTERNS || '';
 
-const frontendUrls = rawFrontendUrls
-  .split(',')
-  .map((value) => value.trim())
-  .filter(Boolean);
+const frontendUrls = parseCsvEnv(rawFrontendUrls);
+const frontendUrlPatterns = parseCsvEnv(rawFrontendUrlPatterns);
 
 if ((process.env.NODE_ENV || 'development') !== 'production') {
   frontendUrls.push(
@@ -32,6 +37,7 @@ const env = {
   port: parsePositiveNumber(process.env.PORT, 4010, 'PORT'),
   frontendUrl: frontendUrls[0] || 'http://localhost:8100',
   frontendUrls: Array.from(new Set(frontendUrls)),
+  frontendUrlPatterns: Array.from(new Set(frontendUrlPatterns)),
   db: {
     host: process.env.DB_HOST || 'localhost',
     port: parsePositiveNumber(process.env.DB_PORT, 5432, 'DB_PORT'),
@@ -90,7 +96,10 @@ const insecureJwtSecrets = new Set([
 ]);
 
 if (isProduction) {
-  failIfInvalid(Boolean(process.env.FRONTEND_URLS || process.env.FRONTEND_URL), 'FRONTEND_URLS/FRONTEND_URL es requerido en producción.');
+  failIfInvalid(
+    Boolean(process.env.FRONTEND_URLS || process.env.FRONTEND_URL || process.env.FRONTEND_URL_PATTERNS || process.env.FRONTEND_ORIGIN_PATTERNS),
+    'FRONTEND_URLS/FRONTEND_URL o FRONTEND_URL_PATTERNS/FRONTEND_ORIGIN_PATTERNS es requerido en producción.',
+  );
   failIfInvalid(Boolean(process.env.DB_HOST), 'DB_HOST es requerido en producción.');
   failIfInvalid(Boolean(process.env.DB_NAME), 'DB_NAME es requerido en producción.');
   failIfInvalid(Boolean(process.env.DB_USER), 'DB_USER es requerido en producción.');

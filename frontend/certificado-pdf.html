@@ -425,7 +425,7 @@
 
       .code-strip {
         position: absolute;
-        top: calc(var(--photo-slot-top) + var(--photo-slot-width) * 1.25 + var(--photo-code-gap));
+        top: calc(var(--photo-slot-top) + var(--photo-slot-width) * 1.25 + var(--photo-code-gap) + 10px);
         right: var(--photo-slot-right);
         width: var(--photo-slot-width);
         min-height: 36px;
@@ -697,7 +697,6 @@
 
         <div class="actions">
           <button class="btn-primary" type="button" id="printButton">Descargar PDF</button>
-          <button class="btn-secondary" type="button" id="demoButton">Cargar ejemplo</button>
           <button class="btn-secondary" type="button" id="clearButton">Limpiar campos</button>
         </div>
       </aside>
@@ -1173,10 +1172,6 @@
 
         embedPrintButton?.addEventListener("click", () => {
           exportCertificatePdf();
-        });
-
-        document.getElementById("demoButton").addEventListener("click", () => {
-          loadDefaults();
         });
 
         document.getElementById("clearButton").addEventListener("click", () => {

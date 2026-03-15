@@ -10,7 +10,17 @@ const errorHandler = require('./middlewares/errorHandler');
 
 const app = express();
 app.set('etag', false);
-const allowedOrigins = new Set(env.frontendUrls);
+const allowedOrigins = new Set(env.frontendUrls.map((origin) => String(origin).toLowerCase()));
+const createOriginPatternRegex = (pattern) => {
+  const normalized = String(pattern || '').trim().toLowerCase();
+  if (!normalized) return null;
+
+  const escapedPattern = normalized.replace(/[|\\{}()[\]^$+?.]/g, '\\$&').replaceAll('*', '.*');
+  return new RegExp(`^${escapedPattern}$`, 'i');
+};
+const allowedOriginPatternRegexes = env.frontendUrlPatterns
+  .map(createOriginPatternRegex)
+  .filter(Boolean);
 const isDevelopment = env.nodeEnv !== 'production';
 const privateIpv4Pattern =
   /^(10(?:\.\d{1,3}){3}|127(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}|0\.0\.0\.0)$/;
@@ -34,7 +44,9 @@ const isDevelopmentLocalOrigin = (origin) => {
 
 const isAllowedCorsOrigin = (origin) => {
   if (!origin) return true;
-  if (allowedOrigins.has(origin)) return true;
+  const normalizedOrigin = String(origin).toLowerCase();
+  if (allowedOrigins.has(normalizedOrigin)) return true;
+  if (allowedOriginPatternRegexes.some((regex) => regex.test(normalizedOrigin))) return true;
   if (isDevelopment && (origin === 'null' || isDevelopmentLocalOrigin(origin))) return true;
   return false;
 };
