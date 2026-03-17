@@ -174,8 +174,42 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const changePassword = async ({ currentPassword = '', newPassword = '' } = {}) => {
+    try {
+      const response = await api.post('/auth/change-password', {
+        ...(currentPassword ? { current_password: currentPassword } : {}),
+        new_password: newPassword,
+      });
+
+      const nextUser = response.data?.user;
+      if (nextUser) {
+        setAuth((prev) => ({
+          ...prev,
+          user: nextUser,
+        }));
+      }
+
+      return {
+        ok: true,
+        message: response.data?.message || 'Contraseña actualizada.',
+      };
+    } catch (error) {
+      const responseData = error?.response?.data;
+      const responseMessage =
+        (typeof responseData === 'string' && responseData.trim()) ||
+        (typeof responseData?.message === 'string' && responseData.message.trim()) ||
+        '';
+
+      return {
+        ok: false,
+        message: responseMessage || 'No se pudo actualizar la contraseña.',
+      };
+    }
+  };
+
   const permissions = useMemo(() => auth.user?.permissions || [], [auth.user]);
   const permissionSet = useMemo(() => new Set(permissions), [permissions]);
+  const mustChangePassword = Boolean(auth.user?.must_change_password);
 
   const hasPermission = (permissionCode) => {
     if (!permissionCode) return false;
@@ -194,9 +228,11 @@ export function AuthProvider({ children }) {
     refreshToken: auth.refreshToken,
     loading,
     isAuthenticated: Boolean(auth.accessToken && auth.user),
+    mustChangePassword,
     hasPermission,
     hasAnyPermission,
     login,
+    changePassword,
     logout,
   };
 

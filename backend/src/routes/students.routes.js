@@ -98,9 +98,64 @@ const studentSelfAttendanceSchema = z.object({
     .optional(),
 });
 
+const studentTransferListSchema = z.object({
+  body: z.object({}).optional(),
+  params: z.object({}).optional(),
+  query: z
+    .object({
+      campus_id: z.coerce.number().int().positive().optional(),
+    })
+    .optional(),
+});
+
+const studentTransferOptionsSchema = z.object({
+  body: z.object({}).optional(),
+  params: z.object({ id: z.coerce.number().int().positive() }),
+  query: z
+    .object({
+      campus_id: z.coerce.number().int().positive().optional(),
+    })
+    .optional(),
+});
+
+const studentTransferCreateSchema = z.object({
+  body: z.object({
+    student_id: z.number().int().positive(),
+    source_enrollment_id: z.number().int().positive(),
+    target_campus_id: z.number().int().positive(),
+    allow_without_target_offering: z.boolean().optional().default(false),
+    request_notes: z.string().trim().max(500).nullable().optional(),
+  }),
+  params: z.object({}).optional(),
+  query: z
+    .object({
+      campus_id: z.coerce.number().int().positive().optional(),
+    })
+    .optional(),
+});
+
+const studentTransferDecisionSchema = z.object({
+  body: z.object({
+    decision: z.enum(['APPROVE', 'REJECT']),
+    review_notes: z.string().trim().max(500).nullable().optional(),
+  }),
+  params: z.object({ transferId: z.coerce.number().int().positive() }),
+  query: z
+    .object({
+      campus_id: z.coerce.number().int().positive().optional(),
+    })
+    .optional(),
+});
+
 const normalizeOptionalEmail = (value) => {
   if (value === null || value === undefined) return null;
   const normalized = String(value).trim().toLowerCase();
+  return normalized || null;
+};
+
+const normalizeOptionalText = (value) => {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
   return normalized || null;
 };
 
@@ -218,6 +273,7 @@ router.get(
       FROM students s
       LEFT JOIN users u_creator ON u_creator.id = s.created_by
       LEFT JOIN users u_student ON u_student.id = s.user_id
+      LEFT JOIN campuses cp_assigned ON cp_assigned.id = s.assigned_campus_id
       WHERE (
         $1::text IS NULL
         OR CONCAT_WS(
@@ -247,14 +303,41 @@ router.get(
       AND s.status = 'ACTIVE'
       AND (
         $2::bigint IS NULL
+        OR s.assigned_campus_id = $2
         OR EXISTS (
           SELECT 1
           FROM enrollments e_scope
           JOIN course_campus cc_scope ON cc_scope.id = e_scope.course_campus_id
           WHERE e_scope.student_id = s.id
             AND cc_scope.campus_id = $2
+            AND e_scope.status <> 'TRANSFERRED'
         )
       )
+    `;
+    const assignedEnrollmentJoin = `
+      LEFT JOIN LATERAL (
+        SELECT
+          e.id AS assigned_enrollment_id,
+          e.status AS assigned_enrollment_status,
+          c.id AS assigned_course_id,
+          c.name AS assigned_course_name,
+          cp.id AS assigned_campus_id,
+          cp.name AS assigned_campus_name,
+          ap.id AS assigned_period_id,
+          ap.name AS assigned_period_name
+        FROM enrollments e
+        JOIN course_campus cc ON cc.id = e.course_campus_id
+        JOIN courses c ON c.id = cc.course_id
+        JOIN campuses cp ON cp.id = cc.campus_id
+        JOIN academic_periods ap ON ap.id = e.period_id
+        WHERE e.student_id = fs.id
+          AND e.status <> 'TRANSFERRED'
+        ORDER BY
+          CASE WHEN e.status = 'ACTIVE' THEN 0 ELSE 1 END,
+          e.updated_at DESC,
+          e.id DESC
+        LIMIT 1
+      ) assigned_enrollment ON TRUE
     `;
 
     let total = 0;
@@ -274,9 +357,11 @@ router.get(
              s.birth_date,
              s.email,
            s.phone,
-           s.address,
-           s.status,
-           s.user_id,
+             s.address,
+             s.assigned_campus_id,
+             cp_assigned.name AS assigned_campus_name_fallback,
+             s.status,
+             s.user_id,
            COALESCE(u_student.is_active, FALSE) AS access_is_active,
            s.created_by,
            CONCAT_WS(' ', u_creator.first_name, u_creator.last_name) AS created_by_name,
@@ -301,6 +386,14 @@ router.get(
            fs.created_by,
            fs.created_by_name,
            fs.created_at,
+           assigned_enrollment.assigned_enrollment_id,
+           assigned_enrollment.assigned_enrollment_status,
+           assigned_enrollment.assigned_course_id,
+           assigned_enrollment.assigned_course_name,
+           COALESCE(assigned_enrollment.assigned_campus_id, fs.assigned_campus_id) AS assigned_campus_id,
+           COALESCE(assigned_enrollment.assigned_campus_name, fs.assigned_campus_name_fallback) AS assigned_campus_name,
+           assigned_enrollment.assigned_period_id,
+           assigned_enrollment.assigned_period_name,
            COALESCE(
              JSON_AGG(
                JSON_BUILD_OBJECT(
@@ -315,6 +408,7 @@ router.get(
              '[]'::json
            ) AS guardians
          FROM filtered_students fs
+         ${assignedEnrollmentJoin}
          LEFT JOIN student_guardian sg ON sg.student_id = fs.id
          LEFT JOIN guardians g ON g.id = sg.guardian_id
          GROUP BY
@@ -326,12 +420,22 @@ router.get(
            fs.email,
            fs.phone,
            fs.address,
+           fs.assigned_campus_id,
+           fs.assigned_campus_name_fallback,
            fs.status,
            fs.user_id,
            fs.access_is_active,
            fs.created_by,
            fs.created_by_name,
-           fs.created_at
+           fs.created_at,
+           assigned_enrollment.assigned_enrollment_id,
+           assigned_enrollment.assigned_enrollment_status,
+           assigned_enrollment.assigned_course_id,
+           assigned_enrollment.assigned_course_name,
+           assigned_enrollment.assigned_campus_id,
+           assigned_enrollment.assigned_campus_name,
+           assigned_enrollment.assigned_period_id,
+           assigned_enrollment.assigned_period_name
          ORDER BY fs.created_at DESC`,
         [search, campusScopeId, pageSize, offset],
       );
@@ -347,14 +451,16 @@ router.get(
              s.document_number,
              s.birth_date,
              s.email,
-           s.phone,
-           s.address,
-           s.status,
-           s.user_id,
-           COALESCE(u_student.is_active, FALSE) AS access_is_active,
-           s.created_by,
-           CONCAT_WS(' ', u_creator.first_name, u_creator.last_name) AS created_by_name,
-           s.created_at
+             s.phone,
+             s.address,
+             s.assigned_campus_id,
+             cp_assigned.name AS assigned_campus_name_fallback,
+             s.status,
+             s.user_id,
+             COALESCE(u_student.is_active, FALSE) AS access_is_active,
+             s.created_by,
+             CONCAT_WS(' ', u_creator.first_name, u_creator.last_name) AS created_by_name,
+             s.created_at
            ${baseFilter}
            ORDER BY s.created_at DESC
          )
@@ -373,6 +479,14 @@ router.get(
            fs.created_by,
            fs.created_by_name,
            fs.created_at,
+           assigned_enrollment.assigned_enrollment_id,
+           assigned_enrollment.assigned_enrollment_status,
+           assigned_enrollment.assigned_course_id,
+           assigned_enrollment.assigned_course_name,
+           COALESCE(assigned_enrollment.assigned_campus_id, fs.assigned_campus_id) AS assigned_campus_id,
+           COALESCE(assigned_enrollment.assigned_campus_name, fs.assigned_campus_name_fallback) AS assigned_campus_name,
+           assigned_enrollment.assigned_period_id,
+           assigned_enrollment.assigned_period_name,
            COALESCE(
              JSON_AGG(
                JSON_BUILD_OBJECT(
@@ -387,6 +501,7 @@ router.get(
              '[]'::json
            ) AS guardians
          FROM filtered_students fs
+         ${assignedEnrollmentJoin}
          LEFT JOIN student_guardian sg ON sg.student_id = fs.id
          LEFT JOIN guardians g ON g.id = sg.guardian_id
          GROUP BY
@@ -398,12 +513,22 @@ router.get(
            fs.email,
            fs.phone,
            fs.address,
+           fs.assigned_campus_id,
+           fs.assigned_campus_name_fallback,
            fs.status,
            fs.user_id,
            fs.access_is_active,
            fs.created_by,
            fs.created_by_name,
-           fs.created_at
+           fs.created_at,
+           assigned_enrollment.assigned_enrollment_id,
+           assigned_enrollment.assigned_enrollment_status,
+           assigned_enrollment.assigned_course_id,
+           assigned_enrollment.assigned_course_name,
+           assigned_enrollment.assigned_campus_id,
+           assigned_enrollment.assigned_campus_name,
+           assigned_enrollment.assigned_period_id,
+           assigned_enrollment.assigned_period_name
          ORDER BY fs.created_at DESC`,
         [search, campusScopeId],
       );
@@ -748,6 +873,548 @@ router.get(
 );
 
 router.get(
+  '/transfers',
+  authorizePermission('students.view'),
+  validate(studentTransferListSchema),
+  asyncHandler(async (req, res) => {
+    const campusScopeId = parseCampusScopeId(req);
+
+    const { rows } = await query(
+      `SELECT
+         tr.id,
+         tr.student_id,
+         CONCAT_WS(' ', s.first_name, s.last_name) AS student_name,
+         s.document_number AS student_document,
+         tr.source_enrollment_id,
+         tr.approved_enrollment_id,
+         tr.source_campus_id,
+         cp_source.name AS source_campus_name,
+         tr.target_campus_id,
+         cp_target.name AS target_campus_name,
+         tr.allow_without_target_offering,
+         c.id AS course_id,
+         c.name AS course_name,
+         ap.id AS period_id,
+         ap.name AS period_name,
+         tr.status,
+         tr.request_notes,
+         tr.review_notes,
+         tr.requested_by,
+         CONCAT_WS(' ', u_requested.first_name, u_requested.last_name) AS requested_by_name,
+         tr.reviewed_by,
+         CONCAT_WS(' ', u_reviewed.first_name, u_reviewed.last_name) AS reviewed_by_name,
+         tr.created_at,
+         tr.updated_at,
+         tr.decided_at,
+         CASE
+           WHEN $1::bigint IS NULL THEN 'ALL'
+           WHEN tr.target_campus_id = $1 THEN 'INCOMING'
+           WHEN tr.source_campus_id = $1 THEN 'OUTGOING'
+           ELSE 'OTHER'
+         END AS direction,
+         (
+           tr.status = 'PENDING'
+           AND $1::bigint IS NOT NULL
+           AND tr.target_campus_id = $1
+         ) AS can_review
+       FROM student_transfer_requests tr
+       JOIN students s ON s.id = tr.student_id
+       JOIN enrollments e_source ON e_source.id = tr.source_enrollment_id
+       JOIN course_campus cc_source ON cc_source.id = e_source.course_campus_id
+       JOIN courses c ON c.id = cc_source.course_id
+       JOIN academic_periods ap ON ap.id = e_source.period_id
+       JOIN campuses cp_source ON cp_source.id = tr.source_campus_id
+       JOIN campuses cp_target ON cp_target.id = tr.target_campus_id
+       LEFT JOIN users u_requested ON u_requested.id = tr.requested_by
+       LEFT JOIN users u_reviewed ON u_reviewed.id = tr.reviewed_by
+       WHERE (
+         $1::bigint IS NULL
+         OR tr.source_campus_id = $1
+         OR tr.target_campus_id = $1
+       )
+       ORDER BY
+         CASE WHEN tr.status = 'PENDING' THEN 0 ELSE 1 END,
+         tr.created_at DESC,
+         tr.id DESC`,
+      [campusScopeId],
+    );
+
+    return res.json({ items: rows });
+  }),
+);
+
+router.get(
+  '/:id/transfer-options',
+  authorizePermission('students.view'),
+  validate(studentTransferOptionsSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const campusScopeId = parseCampusScopeId(req);
+
+    const studentResult = await query(
+      `SELECT
+         s.id,
+         s.first_name,
+         s.last_name,
+         s.document_number
+       FROM students s
+       WHERE s.id = $1
+         AND s.status = 'ACTIVE'
+         AND (
+           $2::bigint IS NULL
+           OR EXISTS (
+             SELECT 1
+             FROM enrollments e_scope
+             JOIN course_campus cc_scope ON cc_scope.id = e_scope.course_campus_id
+             WHERE e_scope.student_id = s.id
+               AND e_scope.status = 'ACTIVE'
+               AND cc_scope.campus_id = $2
+           )
+         )
+       LIMIT 1`,
+      [id, campusScopeId],
+    );
+
+    if (studentResult.rowCount === 0) {
+      throw new ApiError(404, 'Alumno no encontrado en la sede activa.');
+    }
+
+    const enrollmentResult = await query(
+      `SELECT
+         e.id AS enrollment_id,
+         e.period_id,
+         ap.name AS period_name,
+         cc_source.campus_id AS source_campus_id,
+         cp_source.name AS source_campus_name,
+         c.id AS course_id,
+         c.name AS course_name
+       FROM enrollments e
+       JOIN course_campus cc_source ON cc_source.id = e.course_campus_id
+       JOIN campuses cp_source ON cp_source.id = cc_source.campus_id
+       JOIN courses c ON c.id = cc_source.course_id
+       JOIN academic_periods ap ON ap.id = e.period_id
+       WHERE e.student_id = $1
+         AND e.status = 'ACTIVE'
+         AND ($2::bigint IS NULL OR cc_source.campus_id = $2)
+       ORDER BY e.created_at DESC, e.id DESC`,
+      [id, campusScopeId],
+    );
+
+    const enrollmentIds = enrollmentResult.rows.map((row) => Number(row.enrollment_id));
+    const targetsByEnrollmentId = new Map();
+    const enabledTargetsByEnrollmentId = new Map();
+    const allCampusResult = await query(
+      `SELECT id AS campus_id, name AS campus_name
+       FROM campuses
+       ORDER BY name ASC`,
+    );
+    const allCampuses = allCampusResult.rows.map((row) => ({
+      campus_id: Number(row.campus_id),
+      campus_name: row.campus_name,
+    }));
+
+    if (enrollmentIds.length > 0) {
+      const enabledTargetResult = await query(
+        `SELECT
+           e.id AS enrollment_id,
+           cp_target.id AS campus_id,
+           cp_target.name AS campus_name
+         FROM enrollments e
+         JOIN course_campus cc_source ON cc_source.id = e.course_campus_id
+         JOIN course_campus cc_target
+           ON cc_target.course_id = cc_source.course_id
+          AND cc_target.campus_id <> cc_source.campus_id
+          AND cc_target.is_active = TRUE
+         JOIN campuses cp_target ON cp_target.id = cc_target.campus_id
+         WHERE e.id = ANY($1::bigint[])
+         ORDER BY cp_target.name ASC`,
+        [enrollmentIds],
+      );
+
+      for (const row of enabledTargetResult.rows) {
+        const key = Number(row.enrollment_id);
+        if (!enabledTargetsByEnrollmentId.has(key)) {
+          enabledTargetsByEnrollmentId.set(key, []);
+        }
+        enabledTargetsByEnrollmentId.get(key).push({
+          campus_id: Number(row.campus_id),
+          campus_name: row.campus_name,
+        });
+      }
+
+      const targetResult = await query(
+        `SELECT
+           e.id AS enrollment_id,
+           cp_target.id AS campus_id,
+           cp_target.name AS campus_name
+         FROM enrollments e
+         JOIN course_campus cc_source ON cc_source.id = e.course_campus_id
+         JOIN course_campus cc_target
+           ON cc_target.course_id = cc_source.course_id
+          AND cc_target.campus_id <> cc_source.campus_id
+          AND cc_target.is_active = TRUE
+         JOIN campuses cp_target ON cp_target.id = cc_target.campus_id
+         WHERE e.id = ANY($1::bigint[])
+           AND NOT EXISTS (
+             SELECT 1
+             FROM enrollments e_existing
+             WHERE e_existing.student_id = e.student_id
+               AND e_existing.course_campus_id = cc_target.id
+               AND e_existing.period_id = e.period_id
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM student_transfer_requests tr_pending
+             WHERE tr_pending.source_enrollment_id = e.id
+               AND tr_pending.status = 'PENDING'
+           )
+         ORDER BY cp_target.name ASC`,
+        [enrollmentIds],
+      );
+
+      for (const row of targetResult.rows) {
+        const key = Number(row.enrollment_id);
+        if (!targetsByEnrollmentId.has(key)) {
+          targetsByEnrollmentId.set(key, []);
+        }
+        targetsByEnrollmentId.get(key).push({
+          campus_id: Number(row.campus_id),
+          campus_name: row.campus_name,
+        });
+      }
+    }
+
+    const options = enrollmentResult.rows.map((row) => ({
+      ...row,
+      course_enabled_campuses: enabledTargetsByEnrollmentId.get(Number(row.enrollment_id)) || [],
+      target_campuses: targetsByEnrollmentId.get(Number(row.enrollment_id)) || [],
+      all_target_campuses: allCampuses.filter((campus) => Number(campus.campus_id) !== Number(row.source_campus_id)),
+    }));
+
+    return res.json({
+      item: {
+        student: studentResult.rows[0],
+        options,
+      },
+    });
+  }),
+);
+
+router.post(
+  '/transfers',
+  authorizePermission('enrollments.manage'),
+  validate(studentTransferCreateSchema),
+  asyncHandler(async (req, res) => {
+    const campusScopeId = parseCampusScopeId(req);
+    if (!campusScopeId) {
+      throw new ApiError(400, 'Selecciona una sede activa para registrar el traslado.');
+    }
+
+    const {
+      student_id,
+      source_enrollment_id,
+      target_campus_id,
+      allow_without_target_offering = false,
+      request_notes = null,
+    } = req.validated.body;
+    const normalizedRequestNotes = normalizeOptionalText(request_notes);
+
+    if (Number(target_campus_id) === Number(campusScopeId)) {
+      throw new ApiError(400, 'La sede destino debe ser diferente de la sede actual.');
+    }
+
+    const created = await withTransaction(async (tx) => {
+      const sourceEnrollmentResult = await tx.query(
+        `SELECT
+           e.id,
+           e.student_id,
+           e.period_id,
+           e.status,
+           cc.campus_id AS source_campus_id,
+           cc.course_id
+         FROM enrollments e
+         JOIN course_campus cc ON cc.id = e.course_campus_id
+         WHERE e.id = $1
+           AND e.student_id = $2
+         FOR UPDATE`,
+        [source_enrollment_id, student_id],
+      );
+
+      if (sourceEnrollmentResult.rowCount === 0) {
+        throw new ApiError(404, 'No se encontró la matrícula origen para el traslado.');
+      }
+
+      const sourceEnrollment = sourceEnrollmentResult.rows[0];
+
+      if (Number(sourceEnrollment.source_campus_id) !== Number(campusScopeId)) {
+        throw new ApiError(403, 'Solo puedes solicitar traslados desde la sede activa.');
+      }
+
+      if (sourceEnrollment.status !== 'ACTIVE') {
+        throw new ApiError(409, 'Solo se pueden trasladar matrículas activas.');
+      }
+
+      const targetCampusResult = await tx.query(`SELECT id FROM campuses WHERE id = $1 LIMIT 1`, [target_campus_id]);
+      if (targetCampusResult.rowCount === 0) {
+        throw new ApiError(404, 'La sede destino seleccionada no existe.');
+      }
+
+      const targetOfferingResult = await tx.query(
+        `SELECT id
+         FROM course_campus
+         WHERE course_id = $1
+           AND campus_id = $2
+           AND is_active = TRUE
+         LIMIT 1`,
+        [sourceEnrollment.course_id, target_campus_id],
+      );
+
+      if (targetOfferingResult.rowCount === 0 && !allow_without_target_offering) {
+        throw new ApiError(409, 'La sede destino no tiene una oferta activa para este curso.');
+      }
+
+      if (targetOfferingResult.rowCount > 0) {
+        const existingEnrollmentResult = await tx.query(
+          `SELECT id
+           FROM enrollments
+           WHERE student_id = $1
+             AND course_campus_id = $2
+             AND period_id = $3
+           LIMIT 1`,
+          [student_id, targetOfferingResult.rows[0].id, sourceEnrollment.period_id],
+        );
+
+        if (existingEnrollmentResult.rowCount > 0) {
+          throw new ApiError(409, 'El alumno ya tiene una matrícula registrada en la sede destino para ese periodo.');
+        }
+      }
+
+      const pendingResult = await tx.query(
+        `SELECT id
+         FROM student_transfer_requests
+         WHERE source_enrollment_id = $1
+           AND status = 'PENDING'
+         LIMIT 1`,
+        [source_enrollment_id],
+      );
+
+      if (pendingResult.rowCount > 0) {
+        throw new ApiError(409, 'La matrícula ya tiene una solicitud de traslado pendiente.');
+      }
+
+      const createdResult = await tx.query(
+        `INSERT INTO student_transfer_requests (
+           student_id,
+           source_enrollment_id,
+           source_campus_id,
+           target_campus_id,
+           allow_without_target_offering,
+           requested_by,
+           request_notes
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, student_id, source_enrollment_id, source_campus_id, target_campus_id, allow_without_target_offering, status, created_at`,
+        [
+          student_id,
+          source_enrollment_id,
+          sourceEnrollment.source_campus_id,
+          target_campus_id,
+          allow_without_target_offering,
+          req.user.id,
+          normalizedRequestNotes,
+        ],
+      );
+
+      return createdResult.rows[0];
+    });
+
+    return res.status(201).json({ message: 'Solicitud de traslado registrada.', item: created });
+  }),
+);
+
+router.patch(
+  '/transfers/:transferId/decision',
+  authorizePermission('enrollments.manage'),
+  validate(studentTransferDecisionSchema),
+  asyncHandler(async (req, res) => {
+    const campusScopeId = parseCampusScopeId(req);
+    if (!campusScopeId) {
+      throw new ApiError(400, 'Selecciona la sede destino activa para revisar el traslado.');
+    }
+
+    const { transferId } = req.validated.params;
+    const { decision, review_notes = null } = req.validated.body;
+    const normalizedReviewNotes = normalizeOptionalText(review_notes);
+
+    if (decision === 'REJECT' && !normalizedReviewNotes) {
+      throw new ApiError(400, 'Debes indicar un motivo para rechazar el traslado.');
+    }
+
+    const resolved = await withTransaction(async (tx) => {
+      const transferResult = await tx.query(
+        `SELECT
+           tr.id,
+           tr.student_id,
+           tr.source_enrollment_id,
+           tr.source_campus_id,
+           tr.target_campus_id,
+           tr.allow_without_target_offering,
+           tr.status,
+           e.period_id,
+           e.status AS source_enrollment_status,
+           cc_source.course_id
+         FROM student_transfer_requests tr
+         JOIN enrollments e ON e.id = tr.source_enrollment_id
+         JOIN course_campus cc_source ON cc_source.id = e.course_campus_id
+         WHERE tr.id = $1
+         FOR UPDATE`,
+        [transferId],
+      );
+
+      if (transferResult.rowCount === 0) {
+        throw new ApiError(404, 'Solicitud de traslado no encontrada.');
+      }
+
+      const transfer = transferResult.rows[0];
+
+      if (Number(transfer.target_campus_id) !== Number(campusScopeId)) {
+        throw new ApiError(403, 'Solo la sede destino puede revisar esta solicitud de traslado.');
+      }
+
+      if (transfer.status !== 'PENDING') {
+        throw new ApiError(409, 'La solicitud ya fue atendida.');
+      }
+
+      if (decision === 'REJECT') {
+        const rejectResult = await tx.query(
+          `UPDATE student_transfer_requests
+           SET status = 'REJECTED',
+               reviewed_by = $1,
+               review_notes = $2,
+               decided_at = NOW(),
+               updated_at = NOW()
+           WHERE id = $3
+           RETURNING id, status, review_notes, decided_at`,
+          [req.user.id, normalizedReviewNotes, transferId],
+        );
+
+        return {
+          ...rejectResult.rows[0],
+          moved_installments: 0,
+          approved_enrollment_id: null,
+        };
+      }
+
+      if (transfer.source_enrollment_status !== 'ACTIVE') {
+        throw new ApiError(409, 'La matrícula origen ya no está activa. No se puede aprobar el traslado.');
+      }
+
+      const targetOfferingResult = await tx.query(
+        `SELECT id
+         FROM course_campus
+         WHERE course_id = $1
+           AND campus_id = $2
+           AND is_active = TRUE
+         LIMIT 1`,
+        [transfer.course_id, transfer.target_campus_id],
+      );
+
+      if (targetOfferingResult.rowCount === 0 && !transfer.allow_without_target_offering) {
+        throw new ApiError(409, 'La sede destino no tiene una oferta activa para este curso.');
+      }
+
+      const targetCourseCampusId = targetOfferingResult.rows[0]?.id || null;
+
+      if (targetCourseCampusId) {
+        const existingEnrollmentResult = await tx.query(
+          `SELECT id
+           FROM enrollments
+           WHERE student_id = $1
+             AND course_campus_id = $2
+             AND period_id = $3
+           LIMIT 1`,
+          [transfer.student_id, targetCourseCampusId, transfer.period_id],
+        );
+
+        if (existingEnrollmentResult.rowCount > 0) {
+          throw new ApiError(409, 'El alumno ya tiene una matrícula registrada en la sede destino para ese periodo.');
+        }
+      }
+
+      await tx.query(
+        `UPDATE enrollments
+         SET status = 'TRANSFERRED',
+             updated_at = NOW()
+         WHERE id = $1`,
+        [transfer.source_enrollment_id],
+      );
+
+      let approvedEnrollmentId = null;
+      let movedInstallmentsCount = 0;
+
+      if (targetCourseCampusId) {
+        const createdEnrollmentResult = await tx.query(
+          `INSERT INTO enrollments (student_id, course_campus_id, period_id, enrollment_date, status, created_by)
+           VALUES ($1, $2, $3, CURRENT_DATE, 'ACTIVE', $4)
+           RETURNING id`,
+          [transfer.student_id, targetCourseCampusId, transfer.period_id, req.user.id],
+        );
+
+        approvedEnrollmentId = createdEnrollmentResult.rows[0].id;
+
+        const movedInstallmentsResult = await tx.query(
+          `UPDATE installments
+           SET enrollment_id = $1,
+               updated_at = NOW()
+           WHERE enrollment_id = $2
+             AND status IN ('PENDING', 'PARTIAL')
+           RETURNING id`,
+          [approvedEnrollmentId, transfer.source_enrollment_id],
+        );
+
+        movedInstallmentsCount = movedInstallmentsResult.rowCount;
+      }
+
+      await tx.query(
+        `UPDATE students
+         SET assigned_campus_id = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [transfer.target_campus_id, transfer.student_id],
+      );
+
+      const approveResult = await tx.query(
+        `UPDATE student_transfer_requests
+         SET status = 'APPROVED',
+             reviewed_by = $1,
+             review_notes = $2,
+             approved_enrollment_id = $3,
+             decided_at = NOW(),
+             updated_at = NOW()
+         WHERE id = $4
+         RETURNING id, status, review_notes, decided_at, approved_enrollment_id`,
+        [req.user.id, normalizedReviewNotes, approvedEnrollmentId, transferId],
+      );
+
+      return {
+        ...approveResult.rows[0],
+        moved_installments: movedInstallmentsCount,
+      };
+    });
+
+    return res.json({
+      message:
+        decision === 'APPROVE'
+          ? resolved.approved_enrollment_id
+            ? 'Traslado aprobado y matrícula creada en la sede destino.'
+            : 'Traslado aprobado sin necesidad de crear matrícula en la sede destino.'
+          : 'Solicitud de traslado rechazada.',
+      item: resolved,
+    });
+  }),
+);
+
+router.get(
   '/:id',
   authorizePermission('students.view'),
   validate(
@@ -770,6 +1437,9 @@ router.get(
           s.email,
           s.phone,
           s.address,
+          s.assigned_campus_id,
+          cp_assigned.name AS assigned_campus_name,
+          cp_assigned.city AS assigned_campus_city,
           s.user_id,
           COALESCE(u_access.is_active, FALSE) AS access_is_active,
           s.created_by,
@@ -777,6 +1447,7 @@ router.get(
           s.status,
           s.created_at
        FROM students s
+       LEFT JOIN campuses cp_assigned ON cp_assigned.id = s.assigned_campus_id
        LEFT JOIN users u_creator ON u_creator.id = s.created_by
        LEFT JOIN users u_access ON u_access.id = s.user_id
        WHERE s.id = $1`,
@@ -800,9 +1471,18 @@ router.get(
           e.id,
           e.status,
           e.enrollment_date,
+          e.period_id,
           p.name AS period_name,
+          p.start_date AS period_start_date,
+          p.end_date AS period_end_date,
+          p.start_date AS course_start_date,
+          p.end_date AS course_end_date,
+          c.id AS course_id,
           c.name AS course_name,
+          c.duration_hours,
+          cc.campus_id,
           cp.name AS campus_name,
+          cp.city AS campus_city,
           cc.modality
        FROM enrollments e
        JOIN academic_periods p ON p.id = e.period_id
@@ -810,7 +1490,11 @@ router.get(
        JOIN courses c ON c.id = cc.course_id
        JOIN campuses cp ON cp.id = cc.campus_id
        WHERE e.student_id = $1
-       ORDER BY e.created_at DESC`,
+       ORDER BY
+         CASE WHEN e.status = 'ACTIVE' THEN 0 ELSE 1 END,
+         COALESCE(p.end_date, e.enrollment_date) DESC,
+         e.updated_at DESC,
+         e.id DESC`,
       [id],
     );
 
@@ -856,6 +1540,18 @@ router.post(
       const roleResult = await tx.query(`SELECT id FROM roles WHERE name = $1`, [STUDENT_ROLE_NAME]);
       if (roleResult.rowCount === 0) {
         throw new ApiError(500, `No existe el rol ${STUDENT_ROLE_NAME}.`);
+      }
+
+      let initialAssignedCampusId = null;
+      if (enrollment?.course_campus_id) {
+        const assignedCampusResult = await tx.query(
+          `SELECT campus_id
+           FROM course_campus
+           WHERE id = $1
+           LIMIT 1`,
+          [enrollment.course_campus_id],
+        );
+        initialAssignedCampusId = assignedCampusResult.rows[0]?.campus_id || null;
       }
 
       const duplicatedDocumentResult = await tx.query(
@@ -909,9 +1605,20 @@ router.post(
       );
 
       const studentResult = await tx.query(
-        `INSERT INTO students (first_name, last_name, document_number, birth_date, email, phone, address, created_by, user_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING id, first_name, last_name, document_number, birth_date, email, phone, address, created_by, user_id, status, created_at`,
+        `INSERT INTO students (
+           first_name,
+           last_name,
+           document_number,
+           birth_date,
+           email,
+           phone,
+           address,
+           assigned_campus_id,
+           created_by,
+           user_id
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING id, first_name, last_name, document_number, birth_date, email, phone, address, assigned_campus_id, created_by, user_id, status, created_at`,
         [
           first_name,
           last_name,
@@ -920,6 +1627,7 @@ router.post(
           studentUserEmail,
           phone,
           address,
+          initialAssignedCampusId,
           req.user.id,
           studentUser.id,
         ],

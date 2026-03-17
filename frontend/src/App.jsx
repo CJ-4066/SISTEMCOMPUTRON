@@ -5,6 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import AppShell from './components/AppShell';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
+const ForcePasswordChangePage = lazy(() => import('./pages/ForcePasswordChangePage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ManagementPage = lazy(() => import('./pages/ManagementPage'));
 const StudentsPage = lazy(() => import('./pages/StudentsPage'));
@@ -40,6 +41,14 @@ export default function App() {
           />
 
           <Route element={<ProtectedRoute />}>
+            <Route
+              path="/change-password"
+              element={
+                <Suspense fallback={routeFallback}>
+                  <ForcePasswordChangePage />
+                </Suspense>
+              }
+            />
             <Route element={<AppShell />}>
               <Route
                 path="/"

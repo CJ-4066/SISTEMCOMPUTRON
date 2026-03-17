@@ -446,6 +446,7 @@ router.patch(
       const passwordHash = await bcrypt.hash(password, 12);
       values.push(passwordHash);
       fieldsToUpdate.push(`password_hash = $${values.length}`);
+      fieldsToUpdate.push(`must_change_password = FALSE`);
     }
 
     if (normalizedDocumentNumber) {

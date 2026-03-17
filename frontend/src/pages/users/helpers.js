@@ -1,5 +1,5 @@
 import { buildDocumentValue, parseDocumentValue } from '../../utils/document';
-import { AVAILABLE_ROLES, INITIAL_CREDENTIAL_FORM } from './constants';
+import { AVAILABLE_ROLES, DEFAULT_CREATE_ROLE, INITIAL_CREDENTIAL_FORM } from './constants';
 
 export const sortUnique = (items = []) =>
   Array.from(new Set((Array.isArray(items) ? items : []).filter(Boolean))).sort();
@@ -36,6 +36,11 @@ export const createCredentialForm = (targetUser = {}) => {
     role: getPrimaryRole(targetUser.roles),
   };
 };
+
+export const createNewUserForm = (role = DEFAULT_CREATE_ROLE) => ({
+  ...INITIAL_CREDENTIAL_FORM,
+  role,
+});
 
 export const buildUserExportRows = (users = []) =>
   users.map((item) => ({

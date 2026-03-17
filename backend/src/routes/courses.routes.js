@@ -61,6 +61,7 @@ router.get(
         .object({
           q: z.string().max(120).optional(),
           campus_id: z.coerce.number().int().positive().optional(),
+          sort: z.enum(['NAME_ASC', 'CREATED_DESC']).optional(),
           page: z.coerce.number().int().min(1).optional(),
           page_size: z.coerce.number().int().min(1).max(200).optional(),
         })
@@ -71,6 +72,7 @@ router.get(
     const queryParams = req.validated.query || {};
     const search = queryParams.q?.trim() || null;
     const requestedCampusId = queryParams.campus_id || null;
+    const sort = queryParams.sort || 'NAME_ASC';
     const hasPagination = queryParams.page !== undefined || queryParams.page_size !== undefined;
     const page = hasPagination ? Number(queryParams.page || 1) : 1;
     const pageSize = hasPagination ? Number(queryParams.page_size || 20) : 0;
@@ -81,6 +83,7 @@ router.get(
       search,
       campus_scope_id: campusScopeId,
       campus_id: requestedCampusId,
+      sort,
       paginated: hasPagination,
       page,
       page_size: hasPagination ? pageSize : null,
@@ -136,7 +139,7 @@ router.get(
          c.is_active,
          c.created_at
        ${baseWhereSql}
-       ORDER BY c.name
+       ORDER BY ${sort === 'CREATED_DESC' ? 'c.created_at DESC, c.id DESC' : 'c.name'}
        ${hasPagination ? 'LIMIT $4 OFFSET $5' : ''}`,
       hasPagination
         ? [search, campusScopeId, requestedCampusId, pageSize, offset]

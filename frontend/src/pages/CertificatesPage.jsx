@@ -1,27 +1,17 @@
-export default function CertificatesPage() {
-  const openGenerator = () => {
-    const version = Date.now();
-    window.open(`/certificado-pdf.html?v=${version}`, '_blank', 'noopener,noreferrer');
-  };
+import CertificateGeneratorLauncher from '../components/certificates/CertificateGeneratorLauncher';
 
+export default function CertificatesPage() {
   return (
     <section className="space-y-3">
       <header className="card animate-rise">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary-600">Certificaciones</p>
         <h1 className="text-2xl font-semibold text-primary-900">Generación de certificados</h1>
         <p className="mt-1 text-sm text-primary-700">
-          Si dentro del sistema se visualiza pequeño, ábrelo en una nueva pestaña para trabajar en tamaño completo.
+          Configura primero los datos del certificado y luego abre el generador con toda la información precargada.
         </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={openGenerator}
-            className="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-700"
-          >
-            Abrir generador en nueva pestaña
-          </button>
-        </div>
       </header>
+
+      <CertificateGeneratorLauncher />
     </section>
   );
 }

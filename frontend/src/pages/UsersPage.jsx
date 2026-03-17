@@ -3,10 +3,13 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
 import { downloadCsv } from '../utils/csv';
+import { buildDocumentValue } from '../utils/document';
 import { fetchAllPages } from '../utils/paginatedFetch';
 import CredentialEditorModal from './users/CredentialEditorModal';
+import UserCreateModal from './users/UserCreateModal';
 import UsersListCard from './users/UsersListCard';
 import {
+  DEFAULT_CREATE_ROLE,
   INITIAL_CREDENTIAL_FORM,
   MANAGEMENT_ACCESS_CODES,
   MANAGEMENT_ACCESS_GROUPS,
@@ -20,6 +23,7 @@ import {
   buildCredentialUpdateState,
   buildUserExportRows,
   createCredentialForm,
+  createNewUserForm,
   getCredentialSaveSuccessMessage,
   getPermissionGroupState,
   sortUnique,
@@ -38,6 +42,15 @@ export default function UsersPage() {
   const [exportingUsers, setExportingUsers] = useState(false);
   const [statusUpdatingUserId, setStatusUpdatingUserId] = useState(null);
 
+  const [showCreateUserModal, setShowCreateUserModal] = useState(false);
+  const [createUserForm, setCreateUserForm] = useState(createNewUserForm());
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
+  const [createAccessPermissions, setCreateAccessPermissions] = useState([]);
+  const [createAccessMenuLevel, setCreateAccessMenuLevel] = useState('MAIN');
+  const [rolePermissionTemplates, setRolePermissionTemplates] = useState(null);
+  const [loadingRolePermissionTemplates, setLoadingRolePermissionTemplates] = useState(false);
+
   const [editingCredentialUser, setEditingCredentialUser] = useState(null);
   const [credentialForm, setCredentialForm] = useState({ ...INITIAL_CREDENTIAL_FORM });
   const [savingCredentials, setSavingCredentials] = useState(false);
@@ -52,6 +65,7 @@ export default function UsersPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
+  const canCreateUsers = hasPermission(PERMISSIONS.USERS_CREATE);
   const canViewUsers = hasPermission(PERMISSIONS.USERS_VIEW);
   const canManageRoles = hasPermission(PERMISSIONS.USERS_ROLES_MANAGE);
   const canManageStatus = hasPermission(PERMISSIONS.USERS_STATUS_MANAGE);
@@ -59,6 +73,7 @@ export default function UsersPage() {
   const isRootAdmin = (user?.roles || []).includes(ROLE_ADMIN);
 
   const canOpenEditor = canManageStatus || canManagePermissions || (canManageRoles && isRootAdmin);
+  const canConfigureCreateAccess = canManagePermissions && rolePermissionTemplates !== null;
 
   const resetFeedback = useCallback(() => {
     setMessage('');
@@ -71,6 +86,15 @@ export default function UsersPage() {
     setInitialCredentialAccessPermissions([]);
     setCredentialPermissionMode('ROLE');
     setAccessMenuLevel('MAIN');
+  }, []);
+
+  const resetCreateUserState = useCallback(() => {
+    setShowCreateUserModal(false);
+    setCreateUserForm(createNewUserForm());
+    setCreatingUser(false);
+    setShowCreatePassword(false);
+    setCreateAccessPermissions([]);
+    setCreateAccessMenuLevel('MAIN');
   }, []);
 
   const loadUsers = useCallback(
@@ -145,6 +169,29 @@ export default function UsersPage() {
     [canManagePermissions, resetCredentialAccessState],
   );
 
+  const loadRolePermissionTemplates = useCallback(async () => {
+    if (!canManagePermissions) {
+      setRolePermissionTemplates(null);
+      return;
+    }
+
+    setLoadingRolePermissionTemplates(true);
+    try {
+      const response = await api.get('/users/permissions', { _skipCampusScope: true });
+      const nextTemplates = Object.fromEntries(
+        (response.data?.roles || []).map((role) => [role.name, sortUnique(role.permissions || [])]),
+      );
+      setRolePermissionTemplates(nextTemplates);
+    } catch (requestError) {
+      setRolePermissionTemplates(null);
+      setError(
+        requestError.response?.data?.message || 'No se pudieron cargar las vistas base de los roles.',
+      );
+    } finally {
+      setLoadingRolePermissionTemplates(false);
+    }
+  }, [canManagePermissions]);
+
   useEffect(() => {
     const debounce = setTimeout(() => {
       setUserPage(1);
@@ -161,6 +208,29 @@ export default function UsersPage() {
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
+
+  useEffect(() => {
+    if (!canManagePermissions) {
+      setRolePermissionTemplates(null);
+      setLoadingRolePermissionTemplates(false);
+      return;
+    }
+
+    loadRolePermissionTemplates();
+  }, [canManagePermissions, loadRolePermissionTemplates]);
+
+  const getRolePermissionTemplate = useCallback(
+    (roleName) => sortUnique(rolePermissionTemplates?.[roleName] || []),
+    [rolePermissionTemplates],
+  );
+
+  useEffect(() => {
+    if (!showCreateUserModal || !canConfigureCreateAccess) return;
+
+    const nextRole = createUserForm.role || DEFAULT_CREATE_ROLE;
+    setCreateAccessPermissions(getRolePermissionTemplate(nextRole));
+    setCreateAccessMenuLevel('MAIN');
+  }, [showCreateUserModal, canConfigureCreateAccess, createUserForm.role, getRolePermissionTemplate]);
 
   const clearUserFilters = () => {
     setUserSearchInput('');
@@ -224,6 +294,25 @@ export default function UsersPage() {
     }
   };
 
+  const openCreateUserModal = () => {
+    if (!canCreateUsers) return;
+
+    resetFeedback();
+    setShowCreateUserModal(true);
+    setCreateUserForm(createNewUserForm());
+    setShowCreatePassword(false);
+    setCreateAccessPermissions(canConfigureCreateAccess ? getRolePermissionTemplate(DEFAULT_CREATE_ROLE) : []);
+    setCreateAccessMenuLevel('MAIN');
+
+    if (canManagePermissions && rolePermissionTemplates === null && !loadingRolePermissionTemplates) {
+      loadRolePermissionTemplates();
+    }
+  };
+
+  const closeCreateUserModal = useCallback(() => {
+    resetCreateUserState();
+  }, [resetCreateUserState]);
+
   const openCredentialEditor = (targetUser) => {
     setEditingCredentialUser(targetUser);
     setCredentialForm(createCredentialForm(targetUser));
@@ -263,11 +352,50 @@ export default function UsersPage() {
     };
   }, [editingCredentialUser, savingCredentials, closeCredentialEditor]);
 
+  useEffect(() => {
+    if (!showCreateUserModal) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && !creatingUser) {
+        closeCreateUserModal();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [showCreateUserModal, creatingUser, closeCreateUserModal]);
+
+  const handleCreateUserFieldChange = useCallback((field, value) => {
+    setCreateUserForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
+
   const handleCredentialFieldChange = useCallback((field, value) => {
     setCredentialForm((prev) => ({
       ...prev,
       [field]: value,
     }));
+  }, []);
+
+  const setCreateAccessGroup = useCallback((group, enabled) => {
+    setCreateAccessPermissions((prev) => updatePermissions(prev, group.permissions, enabled));
+  }, []);
+
+  const setAllCreateAccess = useCallback((enabled) => {
+    setCreateAccessPermissions((prev) => updatePermissions(prev, MENU_ACCESS_CODES, enabled));
+  }, []);
+
+  const setAllCreateManagementAccess = useCallback((enabled) => {
+    setCreateAccessPermissions((prev) => updatePermissions(prev, MANAGEMENT_ACCESS_CODES, enabled));
   }, []);
 
   const setCredentialGroupAccess = useCallback((group, enabled) => {
@@ -281,6 +409,126 @@ export default function UsersPage() {
   const setAllManagementAccess = useCallback((enabled) => {
     setCredentialAccessPermissions((prev) => updatePermissions(prev, MANAGEMENT_ACCESS_CODES, enabled));
   }, []);
+
+  const createRoleTemplatePermissions = useMemo(
+    () => getRolePermissionTemplate(createUserForm.role || DEFAULT_CREATE_ROLE),
+    [createUserForm.role, getRolePermissionTemplate],
+  );
+
+  const createAccessMatchesRole = useMemo(() => {
+    if (!canConfigureCreateAccess) return true;
+    return arraysEqual(sortUnique(createAccessPermissions), createRoleTemplatePermissions);
+  }, [canConfigureCreateAccess, createAccessPermissions, createRoleTemplatePermissions]);
+
+  const saveNewUser = async () => {
+    if (!canCreateUsers) return;
+
+    const normalizedFirstName = createUserForm.first_name.trim();
+    const normalizedLastName = createUserForm.last_name.trim();
+    const normalizedEmail = createUserForm.email.trim().toLowerCase();
+    const normalizedDocumentNumber = createUserForm.document_number.trim();
+    const normalizedPhone = createUserForm.phone.trim();
+    const normalizedAddress = createUserForm.address.trim();
+    const normalizedRole =
+      canManageRoles && isRootAdmin ? (createUserForm.role || DEFAULT_CREATE_ROLE).trim() : DEFAULT_CREATE_ROLE;
+    const useEmailAsPassword = Boolean(createUserForm.use_email_as_password);
+    const resolvedPassword = useEmailAsPassword ? normalizedEmail : createUserForm.password;
+
+    if (!normalizedFirstName || !normalizedLastName) {
+      setError('Nombre y apellido son obligatorios.');
+      return;
+    }
+
+    if (!normalizedDocumentNumber) {
+      setError('El número de documento es obligatorio.');
+      return;
+    }
+
+    if (!normalizedEmail) {
+      setError('El correo es obligatorio.');
+      return;
+    }
+
+    if (useEmailAsPassword && normalizedEmail.length < 8) {
+      setError('El correo debe tener al menos 8 caracteres para usarlo como contraseña temporal.');
+      return;
+    }
+
+    if (!useEmailAsPassword && createUserForm.password.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+
+    if (normalizedRole === 'DOCENTE') {
+      if (!normalizedPhone) {
+        setError('El teléfono del docente es obligatorio.');
+        return;
+      }
+      if (!normalizedAddress) {
+        setError('La dirección del docente es obligatoria.');
+        return;
+      }
+    }
+
+    const registerPayload = {
+      first_name: normalizedFirstName,
+      last_name: normalizedLastName,
+      document_number: buildDocumentValue(createUserForm.document_type, normalizedDocumentNumber),
+      phone: normalizedPhone || null,
+      address: normalizedAddress || null,
+      email: normalizedEmail,
+      password: resolvedPassword,
+      roles: [normalizedRole],
+      must_change_password: useEmailAsPassword,
+    };
+    const normalizedCreateAccess = sortUnique(createAccessPermissions);
+    const shouldSaveCustomAccess = canConfigureCreateAccess && !createAccessMatchesRole;
+
+    setCreatingUser(true);
+    resetFeedback();
+
+    try {
+      const response = await api.post('/auth/register', registerPayload);
+      const createdUserId = response.data?.user?.id;
+
+      if (shouldSaveCustomAccess && createdUserId) {
+        try {
+          await api.put(
+            `/users/permissions/user/${createdUserId}`,
+            {
+              permission_mode: 'PERSONAL',
+              permissions: normalizedCreateAccess,
+            },
+            { _skipCampusScope: true },
+          );
+        } catch (accessError) {
+          closeCreateUserModal();
+          setError(
+            accessError.response?.data?.message ||
+              'El usuario fue creado, pero no se pudieron guardar las vistas personalizadas.',
+          );
+          await loadUsers();
+          return;
+        }
+      }
+
+      closeCreateUserModal();
+      setMessage(
+        useEmailAsPassword
+          ? shouldSaveCustomAccess
+            ? 'Usuario creado con vistas personalizadas. Su contraseña temporal es el correo y deberá cambiarla en el primer ingreso.'
+            : 'Usuario creado correctamente. Su contraseña temporal es el correo y deberá cambiarla en el primer ingreso.'
+          : shouldSaveCustomAccess
+            ? 'Usuario creado con rol y vistas personalizadas.'
+            : 'Usuario creado correctamente.',
+      );
+      await loadUsers();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'No se pudo crear el usuario.');
+    } finally {
+      setCreatingUser(false);
+    }
+  };
 
   const saveUserCredentials = async () => {
     if (!editingCredentialUser) return;
@@ -351,6 +599,22 @@ export default function UsersPage() {
     }
   };
 
+  const createEnabledMenuCount = useMemo(
+    () =>
+      MENU_ACCESS_GROUPS.filter(
+        (group) => getPermissionGroupState(createAccessPermissions, group.permissions) === 'all',
+      ).length,
+    [createAccessPermissions],
+  );
+
+  const createEnabledManagementCount = useMemo(
+    () =>
+      MANAGEMENT_ACCESS_GROUPS.filter(
+        (group) => getPermissionGroupState(createAccessPermissions, group.permissions) === 'all',
+      ).length,
+    [createAccessPermissions],
+  );
+
   const enabledMenuCount = useMemo(
     () =>
       MENU_ACCESS_GROUPS.filter(
@@ -405,12 +669,39 @@ export default function UsersPage() {
         loadingUsers={loadingUsers}
         exportingUsers={exportingUsers}
         onExportUsers={exportUsersCsv}
+        canCreateUsers={canCreateUsers}
+        onOpenCreateUser={openCreateUserModal}
         statusUpdatingUserId={statusUpdatingUserId}
         canManageStatus={canManageStatus}
         onToggleStatus={toggleStatus}
         onOpenCredentialEditor={openCredentialEditor}
         canOpenEditor={canOpenEditor}
-        showReadOnlyNote={!canManageStatus && !canManagePermissions}
+        showReadOnlyNote={!canManageStatus && !canManagePermissions && !canCreateUsers}
+      />
+
+      <UserCreateModal
+        isOpen={showCreateUserModal}
+        creatingUser={creatingUser}
+        onClose={closeCreateUserModal}
+        form={createUserForm}
+        onFieldChange={handleCreateUserFieldChange}
+        onSave={saveNewUser}
+        canManageRoles={canManageRoles}
+        isRootAdmin={isRootAdmin}
+        showPassword={showCreatePassword}
+        onTogglePassword={() => setShowCreatePassword((prev) => !prev)}
+        canManagePermissions={canManagePermissions}
+        permissionTemplatesReady={canConfigureCreateAccess}
+        loadingPermissionTemplates={loadingRolePermissionTemplates}
+        accessPermissions={createAccessPermissions}
+        accessMenuLevel={createAccessMenuLevel}
+        onAccessMenuLevelChange={setCreateAccessMenuLevel}
+        onAccessGroupChange={setCreateAccessGroup}
+        onAllAccessChange={setAllCreateAccess}
+        onAllManagementAccessChange={setAllCreateManagementAccess}
+        enabledMenuCount={createEnabledMenuCount}
+        enabledManagementCount={createEnabledManagementCount}
+        accessMatchesRole={createAccessMatchesRole}
       />
 
       <CredentialEditorModal

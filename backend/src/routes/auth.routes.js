@@ -25,6 +25,13 @@ const { normalizeDocumentNumber } = require('../utils/documentNumber');
 const router = express.Router();
 
 const ROLES = ['ADMIN', 'DOCENTE', 'SECRETARIADO', 'DIRECTOR', 'ALUMNO'];
+const optionalCampusIdSchema = z.preprocess((value) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : value;
+}, z.number().int().positive().nullable().optional());
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -44,6 +51,8 @@ const registerSchema = z.object({
     email: z.string().trim().email(),
     password: z.string().min(8).max(72),
     roles: z.array(z.enum(ROLES)).min(1).max(3).default(['SECRETARIADO']).optional(),
+    base_campus_id: optionalCampusIdSchema,
+    must_change_password: z.boolean().optional().default(false),
   }),
   params: z.object({}).optional(),
   query: z.object({}).optional(),
@@ -61,6 +70,15 @@ const loginSchema = z.object({
 const refreshSchema = z.object({
   body: z.object({
     refresh_token: z.string().min(20),
+  }),
+  params: z.object({}).optional(),
+  query: z.object({}).optional(),
+});
+
+const changePasswordSchema = z.object({
+  body: z.object({
+    current_password: z.string().min(1).optional(),
+    new_password: z.string().min(8).max(72),
   }),
   params: z.object({}).optional(),
   query: z.object({}).optional(),
@@ -91,11 +109,15 @@ router.post(
       email,
       password,
       roles = ['SECRETARIADO'],
+      base_campus_id = null,
+      must_change_password = false,
     } = req.validated.body;
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedDocumentNumber = normalizeDocumentNumber(document_number);
     const normalizedPhone = phone ? String(phone).trim() : null;
     const normalizedAddress = address ? String(address).trim() : null;
+    let creatorBaseCampusId = null;
+    let resolvedBaseCampusId = base_campus_id;
 
     if (roles.includes('DOCENTE')) {
       if (!normalizedPhone) {
@@ -125,6 +147,37 @@ router.post(
       if (!canCreateUsers) {
         throw new ApiError(403, 'No tiene permisos para registrar usuarios.');
       }
+
+      const creatorResult = await query(
+        `SELECT base_campus_id
+         FROM users
+         WHERE id = $1
+         LIMIT 1`,
+        [req.user.id],
+      );
+
+      creatorBaseCampusId = creatorResult.rows[0]?.base_campus_id || null;
+      if (creatorBaseCampusId && resolvedBaseCampusId && Number(resolvedBaseCampusId) !== Number(creatorBaseCampusId)) {
+        throw new ApiError(403, 'Solo puede registrar usuarios en su propia sede.');
+      }
+
+      if (creatorBaseCampusId && !resolvedBaseCampusId) {
+        resolvedBaseCampusId = creatorBaseCampusId;
+      }
+    }
+
+    if (resolvedBaseCampusId !== null) {
+      const campusResult = await query(
+        `SELECT id
+         FROM campuses
+         WHERE id = $1
+         LIMIT 1`,
+        [resolvedBaseCampusId],
+      );
+
+      if (campusResult.rowCount === 0) {
+        throw new ApiError(400, 'La sede seleccionada no existe.');
+      }
     }
 
     const existing = await query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
@@ -147,10 +200,41 @@ router.post(
 
     const created = await withTransaction(async (tx) => {
       const userResult = await tx.query(
-        `INSERT INTO users (first_name, last_name, document_number, phone, address, email, password_hash)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, first_name, last_name, document_number, phone, address, email, is_active, created_at`,
-        [first_name, last_name, normalizedDocumentNumber, normalizedPhone, normalizedAddress, normalizedEmail, hash],
+        `INSERT INTO users (
+           first_name,
+           last_name,
+           document_number,
+           phone,
+           address,
+           email,
+           password_hash,
+           base_campus_id,
+           must_change_password
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING
+           id,
+           first_name,
+           last_name,
+           document_number,
+           phone,
+           address,
+           email,
+           is_active,
+           base_campus_id,
+           must_change_password,
+           created_at`,
+        [
+          first_name,
+          last_name,
+          normalizedDocumentNumber,
+          normalizedPhone,
+          normalizedAddress,
+          normalizedEmail,
+          hash,
+          resolvedBaseCampusId,
+          must_change_password,
+        ],
       );
 
       const user = userResult.rows[0];
@@ -192,7 +276,7 @@ router.post(
     const normalizedEmail = email.trim().toLowerCase();
 
     const { rows } = await query(
-      `SELECT id, first_name, last_name, email, password_hash, is_active, base_campus_id
+      `SELECT id, first_name, last_name, email, password_hash, is_active, base_campus_id, must_change_password
        FROM users
        WHERE email = $1`,
       [normalizedEmail],
@@ -239,6 +323,80 @@ router.post(
         last_name: user.last_name,
         email: user.email,
         base_campus_id: user.base_campus_id || null,
+        must_change_password: Boolean(user.must_change_password),
+        roles,
+        permissions,
+      },
+    });
+  }),
+);
+
+router.post(
+  '/change-password',
+  authenticate,
+  validate(changePasswordSchema),
+  asyncHandler(async (req, res) => {
+    const { current_password, new_password } = req.validated.body;
+
+    const userResult = await query(
+      `SELECT
+         id,
+         first_name,
+         last_name,
+         email,
+         password_hash,
+         is_active,
+         base_campus_id,
+         must_change_password
+       FROM users
+       WHERE id = $1
+       LIMIT 1`,
+      [req.user.id],
+    );
+
+    if (userResult.rowCount === 0) {
+      throw new ApiError(404, 'Usuario no encontrado.');
+    }
+
+    const currentUser = userResult.rows[0];
+    if (!currentUser.is_active) {
+      throw new ApiError(403, 'La cuenta está desactivada.');
+    }
+
+    if (currentUser.must_change_password !== true) {
+      if (!current_password) {
+        throw new ApiError(400, 'La contraseña actual es obligatoria.');
+      }
+
+      const validCurrentPassword = await bcrypt.compare(current_password, currentUser.password_hash);
+      if (!validCurrentPassword) {
+        throw new ApiError(400, 'La contraseña actual no es correcta.');
+      }
+    }
+
+    const samePassword = await bcrypt.compare(new_password, currentUser.password_hash);
+    if (samePassword) {
+      throw new ApiError(400, 'La nueva contraseña debe ser diferente a la actual.');
+    }
+
+    const nextPasswordHash = await bcrypt.hash(new_password, 12);
+    const updatedResult = await query(
+      `UPDATE users
+       SET password_hash = $1,
+           must_change_password = FALSE,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, first_name, last_name, email, is_active, base_campus_id, must_change_password`,
+      [nextPasswordHash, req.user.id],
+    );
+
+    const roles = await getUserRoles(req.user.id);
+    const permissions = await getUserPermissionCodes(req.user.id);
+
+    return res.json({
+      message: 'Contraseña actualizada.',
+      user: {
+        ...updatedResult.rows[0],
         roles,
         permissions,
       },
@@ -349,7 +507,7 @@ router.get(
   authenticate,
   asyncHandler(async (req, res) => {
     const { rows } = await query(
-      `SELECT id, first_name, last_name, email, is_active, base_campus_id
+      `SELECT id, first_name, last_name, email, is_active, base_campus_id, must_change_password
        FROM users
        WHERE id = $1`,
       [req.user.id],
@@ -365,6 +523,7 @@ router.get(
     return res.json({
       user: {
         ...rows[0],
+        must_change_password: Boolean(rows[0].must_change_password),
         roles,
         permissions,
       },

@@ -3,12 +3,12 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage() {
-  const { login, loading, isAuthenticated } = useAuth();
+  const { login, loading, isAuthenticated, mustChangePassword } = useAuth();
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={mustChangePassword ? '/change-password' : '/'} replace />;
   }
 
   const handleSubmit = async (event) => {

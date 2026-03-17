@@ -95,6 +95,55 @@ const ensureStudentsUserLink = async () => {
   await query(`CREATE INDEX IF NOT EXISTS idx_students_user_id ON students(user_id)`);
 };
 
+const ensureStudentsAssignedCampusColumn = async () => {
+  const studentsExistsResult = await query(`SELECT to_regclass('public.students') AS table_name`);
+  const campusesExistsResult = await query(`SELECT to_regclass('public.campuses') AS table_name`);
+  const enrollmentsExistsResult = await query(`SELECT to_regclass('public.enrollments') AS table_name`);
+  const courseCampusExistsResult = await query(`SELECT to_regclass('public.course_campus') AS table_name`);
+  const studentsExists = Boolean(studentsExistsResult.rows[0]?.table_name);
+  const campusesExists = Boolean(campusesExistsResult.rows[0]?.table_name);
+  const enrollmentsExists = Boolean(enrollmentsExistsResult.rows[0]?.table_name);
+  const courseCampusExists = Boolean(courseCampusExistsResult.rows[0]?.table_name);
+
+  if (!studentsExists || !campusesExists) {
+    return;
+  }
+
+  await query(
+    `ALTER TABLE students
+     ADD COLUMN IF NOT EXISTS assigned_campus_id BIGINT REFERENCES campuses(id) ON DELETE SET NULL`,
+  );
+  await query(`CREATE INDEX IF NOT EXISTS idx_students_assigned_campus_id ON students(assigned_campus_id)`);
+
+  if (!enrollmentsExists || !courseCampusExists) {
+    return;
+  }
+
+  await query(`
+    WITH latest_student_campus AS (
+      SELECT
+        e.student_id,
+        cc.campus_id,
+        ROW_NUMBER() OVER (
+          PARTITION BY e.student_id
+          ORDER BY
+            CASE WHEN e.status = 'ACTIVE' THEN 0 ELSE 1 END,
+            e.updated_at DESC,
+            e.id DESC
+        ) AS row_number
+      FROM enrollments e
+      JOIN course_campus cc ON cc.id = e.course_campus_id
+      WHERE e.status <> 'TRANSFERRED'
+    )
+    UPDATE students s
+    SET assigned_campus_id = latest_student_campus.campus_id
+    FROM latest_student_campus
+    WHERE s.id = latest_student_campus.student_id
+      AND latest_student_campus.row_number = 1
+      AND s.assigned_campus_id IS NULL
+  `);
+};
+
 const ensureAlumnoRole = async () => {
   const existsResult = await query(`SELECT to_regclass('public.roles') AS table_name`);
   const tableExists = Boolean(existsResult.rows[0]?.table_name);
@@ -166,6 +215,20 @@ const ensureUsersContactColumns = async () => {
 
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)`);
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address VARCHAR(240)`);
+};
+
+const ensureUsersMustChangePasswordColumn = async () => {
+  const usersExistsResult = await query(`SELECT to_regclass('public.users') AS table_name`);
+  const usersExists = Boolean(usersExistsResult.rows[0]?.table_name);
+
+  if (!usersExists) {
+    return;
+  }
+
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN`);
+  await query(`UPDATE users SET must_change_password = FALSE WHERE must_change_password IS NULL`);
+  await query(`ALTER TABLE users ALTER COLUMN must_change_password SET DEFAULT FALSE`);
+  await query(`ALTER TABLE users ALTER COLUMN must_change_password SET NOT NULL`);
 };
 
 const ensureTeacherAssignmentOverrideColumns = async () => {
@@ -796,6 +859,26 @@ const ensurePaymentsEvidenceColumns = async () => {
     END
     $$;
   `);
+
+  await query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'payments_method_check'
+      ) THEN
+        ALTER TABLE payments DROP CONSTRAINT payments_method_check;
+      END IF;
+
+      ALTER TABLE payments
+      ADD CONSTRAINT payments_method_check
+      CHECK (method IN ('YAPE', 'TRANSFERENCIA', 'QR', 'TARJETA', 'CANJE', 'EFECTIVO', 'OTRO'));
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END
+    $$;
+  `);
 };
 
 const ensureReceiptSnapshotsTable = async () => {
@@ -820,6 +903,36 @@ const ensureReceiptSnapshotsTable = async () => {
     `CREATE INDEX IF NOT EXISTS idx_receipt_snapshots_created_at
      ON receipt_snapshots(created_at DESC)`,
   );
+};
+
+const ensureEnrollmentTransferStatus = async () => {
+  const existsResult = await query(`SELECT to_regclass('public.enrollments') AS table_name`);
+  const tableExists = Boolean(existsResult.rows[0]?.table_name);
+
+  if (!tableExists) {
+    return;
+  }
+
+  await query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'enrollments_status_check'
+      ) THEN
+        ALTER TABLE enrollments
+        DROP CONSTRAINT enrollments_status_check;
+      END IF;
+
+      ALTER TABLE enrollments
+      ADD CONSTRAINT enrollments_status_check
+      CHECK (status IN ('ACTIVE', 'SUSPENDED', 'COMPLETED', 'CANCELED', 'TRANSFERRED'));
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END
+    $$;
+  `);
 };
 
 const ensureCertificateLibraryTable = async () => {
@@ -866,6 +979,52 @@ const ensureCertificateLibraryTable = async () => {
   await query(
     `CREATE INDEX IF NOT EXISTS idx_certificate_library_campus_created
      ON certificate_library(campus_id, created_at DESC)`,
+  );
+};
+
+const ensureStudentTransferRequestsTable = async () => {
+  await query(`
+    CREATE TABLE IF NOT EXISTS student_transfer_requests (
+      id BIGSERIAL PRIMARY KEY,
+      student_id BIGINT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      source_enrollment_id BIGINT NOT NULL REFERENCES enrollments(id) ON DELETE RESTRICT,
+      source_campus_id BIGINT NOT NULL REFERENCES campuses(id) ON DELETE RESTRICT,
+      target_campus_id BIGINT NOT NULL REFERENCES campuses(id) ON DELETE RESTRICT,
+      allow_without_target_offering BOOLEAN NOT NULL DEFAULT FALSE,
+      requested_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      approved_enrollment_id BIGINT REFERENCES enrollments(id) ON DELETE SET NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+        CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'CANCELED')),
+      request_notes VARCHAR(500),
+      review_notes VARCHAR(500),
+      decided_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (source_campus_id <> target_campus_id)
+    )
+  `);
+  await query(
+    `ALTER TABLE student_transfer_requests
+     ADD COLUMN IF NOT EXISTS allow_without_target_offering BOOLEAN NOT NULL DEFAULT FALSE`,
+  );
+
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_student_transfer_requests_source_status_created
+     ON student_transfer_requests(source_campus_id, status, created_at DESC)`,
+  );
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_student_transfer_requests_target_status_created
+     ON student_transfer_requests(target_campus_id, status, created_at DESC)`,
+  );
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_student_transfer_requests_student_created
+     ON student_transfer_requests(student_id, created_at DESC)`,
+  );
+  await query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_student_transfer_requests_pending_source_enrollment
+     ON student_transfer_requests(source_enrollment_id)
+     WHERE status = 'PENDING'`,
   );
 };
 
@@ -970,10 +1129,12 @@ const runBootMigrations = async () => {
   await ensureCourseCampusModality();
   await ensureStudentsCreatedBy();
   await ensureStudentsUserLink();
+  await ensureStudentsAssignedCampusColumn();
   await ensureAlumnoRole();
   await ensureTeacherBaseCampusColumn();
   await ensureUsersDocumentNumberColumn();
   await ensureUsersContactColumns();
+  await ensureUsersMustChangePasswordColumn();
   await ensureTeacherAssignmentOverrideColumns();
   await ensureTeacherCalendarEvents();
   await ensureCourseForumTables();
@@ -984,7 +1145,9 @@ const runBootMigrations = async () => {
   await ensureUsersPersonalPermissionsModel();
   await ensurePaymentsEvidenceColumns();
   await ensureReceiptSnapshotsTable();
+  await ensureEnrollmentTransferStatus();
   await ensureCertificateLibraryTable();
+  await ensureStudentTransferRequestsTable();
   await ensurePerformanceIndexes();
 };
 

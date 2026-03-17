@@ -14,6 +14,8 @@ const teacherDefaults = {
   address: '',
   email: '',
   password: '',
+  base_campus_id: '',
+  use_email_as_password: false,
 };
 
 const assignmentDefaults = {
@@ -37,12 +39,19 @@ const normalizeOptional = (value) => {
 
 export default function TeachersPage() {
   const { user, hasPermission } = useAuth();
+  const userRoles = user?.roles || [];
+  const isRootAdminProfile = userRoles.includes('ADMIN') && !user?.base_campus_id;
+  const defaultTeacherCampusId = !isRootAdminProfile && user?.base_campus_id ? String(user.base_campus_id) : '';
+  const createTeacherFormDefaults = () => ({
+    ...teacherDefaults,
+    base_campus_id: defaultTeacherCampusId,
+  });
   const [teachers, setTeachers] = useState([]);
   const [campuses, setCampuses] = useState([]);
   const [courses, setCourses] = useState([]);
   const [periods, setPeriods] = useState([]);
   const [assignments, setAssignments] = useState([]);
-  const [teacherForm, setTeacherForm] = useState(teacherDefaults);
+  const [teacherForm, setTeacherForm] = useState(createTeacherFormDefaults);
   const [editingTeacherId, setEditingTeacherId] = useState(null);
   const [assignmentForm, setAssignmentForm] = useState(assignmentDefaults);
   const [baseCampusForm, setBaseCampusForm] = useState(baseCampusDefaults);
@@ -64,6 +73,7 @@ export default function TeachersPage() {
   const canCreateUsers = hasPermission(PERMISSIONS.USERS_CREATE);
   const canManageTeacherProfile = hasPermission(PERMISSIONS.USERS_STATUS_MANAGE);
   const canViewCampuses = hasPermission(PERMISSIONS.CAMPUSES_VIEW);
+  const canSelectTeacherCampus = Boolean(isRootAdminProfile && canViewCampuses);
   const isDocenteProfile =
     (user?.roles || []).length === 1 && (user?.roles || []).includes('DOCENTE');
 
@@ -128,6 +138,17 @@ export default function TeachersPage() {
     Boolean(selectedAssignmentOffering?.campus_id) &&
     Number(selectedAssignmentTeacher.base_campus_id) !== Number(selectedAssignmentOffering.campus_id);
 
+  const shouldShowTeacherCampusField = canSelectTeacherCampus || Boolean(teacherForm.base_campus_id);
+  const teacherCampusDisplayName = useMemo(() => {
+    const currentCampusId = String(teacherForm.base_campus_id || '');
+    if (!currentCampusId) return 'Sin sede base asignada';
+
+    const matchedCampus = campuses.find((campus) => String(campus.id) === currentCampusId);
+    if (matchedCampus?.name) return matchedCampus.name;
+    if (currentCampusId === String(defaultTeacherCampusId || '')) return 'Sede del usuario actual';
+    return `Sede #${currentCampusId}`;
+  }, [campuses, defaultTeacherCampusId, teacherForm.base_campus_id]);
+
   const submitTeacher = async (event) => {
     event.preventDefault();
     if (!canCreateUsers && !canManageTeacherProfile) return;
@@ -135,7 +156,23 @@ export default function TeachersPage() {
     setMessage('');
     setError('');
 
+    const normalizedEmail = teacherForm.email.trim().toLowerCase();
+    const useEmailAsPassword = !editingTeacherId && Boolean(teacherForm.use_email_as_password);
+    const resolvedPassword = useEmailAsPassword ? normalizedEmail : teacherForm.password;
+
+    if (useEmailAsPassword && normalizedEmail.length < 8) {
+      setError('El correo debe tener al menos 8 caracteres para usarlo como contraseña temporal.');
+      return;
+    }
+
+    if (!editingTeacherId && !useEmailAsPassword && teacherForm.password.trim().length < 8) {
+      setError('La contraseña del docente debe tener al menos 8 caracteres.');
+      return;
+    }
+
     try {
+      const nextBaseCampusId = teacherForm.base_campus_id ? Number(teacherForm.base_campus_id) : null;
+
       if (editingTeacherId) {
         const payload = {
           first_name: teacherForm.first_name.trim(),
@@ -151,6 +188,15 @@ export default function TeachersPage() {
         }
 
         await api.patch(`/teachers/${editingTeacherId}`, payload);
+
+        const currentTeacher = teachers.find((teacher) => String(teacher.id) === String(editingTeacherId));
+        const currentBaseCampusId = currentTeacher?.base_campus_id || null;
+        if (canManageAssignments && String(currentBaseCampusId || '') !== String(nextBaseCampusId || '')) {
+          await api.patch(`/teachers/${editingTeacherId}/base-campus`, {
+            base_campus_id: nextBaseCampusId,
+            reason: null,
+          });
+        }
       } else {
         await api.post('/auth/register', {
           first_name: teacherForm.first_name.trim(),
@@ -158,13 +204,15 @@ export default function TeachersPage() {
           document_number: buildDocumentValue(teacherForm.document_type, teacherForm.document_number),
           phone: normalizeOptional(teacherForm.phone),
           address: normalizeOptional(teacherForm.address),
-          email: teacherForm.email.trim().toLowerCase(),
-          password: teacherForm.password,
+          email: normalizedEmail,
+          password: resolvedPassword,
           roles: ['DOCENTE'],
+          base_campus_id: nextBaseCampusId,
+          must_change_password: useEmailAsPassword,
         });
       }
 
-      setTeacherForm(teacherDefaults);
+      setTeacherForm(createTeacherFormDefaults());
       setEditingTeacherId(null);
       setShowTeacherForm(false);
       setMessage(editingTeacherId ? 'Docente actualizado correctamente.' : 'Docente creado correctamente.');
@@ -189,13 +237,15 @@ export default function TeachersPage() {
       address: teacher.address || '',
       email: teacher.email || '',
       password: '',
+      base_campus_id: teacher.base_campus_id ? String(teacher.base_campus_id) : '',
+      use_email_as_password: false,
     });
     setEditingTeacherId(teacher.id);
     setShowTeacherForm(true);
   };
 
   const resetTeacherEditor = () => {
-    setTeacherForm(teacherDefaults);
+    setTeacherForm(createTeacherFormDefaults());
     setEditingTeacherId(null);
     setShowTeacherForm(false);
   };
@@ -502,7 +552,7 @@ export default function TeachersPage() {
                 type="button"
                 onClick={() => {
                   if (!showTeacherForm || editingTeacherId) {
-                    setTeacherForm(teacherDefaults);
+                    setTeacherForm(createTeacherFormDefaults());
                     setEditingTeacherId(null);
                   }
                   setShowTeacherForm((value) => !value);
@@ -604,6 +654,28 @@ export default function TeachersPage() {
                   onChange={(event) => setTeacherForm((prev) => ({ ...prev, phone: event.target.value }))}
                   required
                 />
+                {shouldShowTeacherCampusField ? (
+                  canSelectTeacherCampus ? (
+                    <select
+                      className="app-input"
+                      value={teacherForm.base_campus_id}
+                      onChange={(event) =>
+                        setTeacherForm((prev) => ({ ...prev, base_campus_id: event.target.value }))
+                      }
+                      required={!editingTeacherId}
+                      disabled={Boolean(editingTeacherId && !canManageAssignments)}
+                    >
+                      <option value="">{editingTeacherId ? 'Sin sede base' : 'Selecciona una sede base'}</option>
+                      {campuses.map((campus) => (
+                        <option key={campus.id} value={campus.id}>
+                          {campus.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input className="app-input" value={teacherCampusDisplayName} readOnly disabled />
+                  )
+                ) : null}
                 <input
                   type="email"
                   className="app-input"
@@ -612,14 +684,33 @@ export default function TeachersPage() {
                   onChange={(event) => setTeacherForm((prev) => ({ ...prev, email: event.target.value }))}
                   required
                 />
+                {!editingTeacherId ? (
+                  <label className="flex items-center gap-2 rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-sm text-primary-800 sm:col-span-2 lg:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(teacherForm.use_email_as_password)}
+                      onChange={(event) =>
+                        setTeacherForm((prev) => ({ ...prev, use_email_as_password: event.target.checked }))
+                      }
+                    />
+                    <span>Usar el correo como contraseña temporal y pedir cambio en el primer ingreso.</span>
+                  </label>
+                ) : null}
                 <input
                   type="password"
                   className="app-input"
-                  placeholder={editingTeacherId ? 'Nueva contrasena (opcional)' : 'Contrasena inicial'}
+                  placeholder={
+                    editingTeacherId
+                      ? 'Nueva contrasena (opcional)'
+                      : teacherForm.use_email_as_password
+                        ? 'Se usará el correo como contraseña temporal'
+                        : 'Contrasena inicial'
+                  }
                   value={teacherForm.password}
                   onChange={(event) => setTeacherForm((prev) => ({ ...prev, password: event.target.value }))}
                   required={!editingTeacherId}
                   minLength={8}
+                  disabled={!editingTeacherId && Boolean(teacherForm.use_email_as_password)}
                 />
                 <input
                   className="app-input sm:col-span-2 lg:col-span-4"

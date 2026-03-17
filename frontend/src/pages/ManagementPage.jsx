@@ -1,11 +1,13 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState, useTransition } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { MANAGEMENT_SECTION_ITEMS } from '../constants/managementSections';
 import { PERMISSIONS } from '../constants/permissions';
+import { calculateAgeFromBirthDate, formatAgeLabel } from '../utils/age';
 import { buildDocumentValue, DOCUMENT_TYPE_OPTIONS, parseDocumentValue } from '../utils/document';
 import PaginationControls from '../components/PaginationControls';
+import CertificateGeneratorLauncher from '../components/certificates/CertificateGeneratorLauncher';
 import PaymentsPage from './PaymentsPage';
 
 const createStudentDefaults = () => ({
@@ -48,6 +50,8 @@ const teacherDefaults = {
   address: '',
   email: '',
   password: '',
+  base_campus_id: '',
+  use_email_as_password: false,
 };
 
 const campusDefaults = {
@@ -94,7 +98,9 @@ const COURSE_DAY_OPTIONS = [
 ];
 const STUDENT_PAGE_SIZE = 10;
 const ENROLLMENT_RECENT_LIMIT = 10;
+const RECENT_COURSES_PREVIEW_LIMIT = 20;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const TEACHER_ASSIGNMENT_FILTER_CHUNK_SIZE = 200;
 
 const ENROLLMENT_STATUS_LABELS = {
   ACTIVE: 'Activa',
@@ -213,6 +219,7 @@ const timeToMinutes = (value) => {
 
 export default function ManagementPage() {
   const { user, hasPermission } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const canViewStudents = hasPermission(PERMISSIONS.STUDENTS_VIEW);
@@ -234,6 +241,7 @@ export default function ManagementPage() {
   const canViewPaymentConcepts = hasPermission(PERMISSIONS.PAYMENT_CONCEPTS_VIEW);
   const canViewAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW);
   const canManageAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_MANAGE);
+  const canManageTransfers = canViewStudents && canManageEnrollments;
   const canManageStudentAccess = canManageTeacherProfile;
   const canReadStudents = canViewStudents || canManageStudents;
   const canReadTeachers = canViewTeachers || canCreateTeachers || canManageTeacherProfile;
@@ -246,11 +254,18 @@ export default function ManagementPage() {
   const userRoles = user?.roles || [];
   const isRootAdminProfile = userRoles.includes('ADMIN') && !user?.base_campus_id;
   const canSelectEnrollmentCampus = Boolean(isRootAdminProfile && canManageEnrollments);
+  const defaultTeacherCampusId = !isRootAdminProfile && user?.base_campus_id ? String(user.base_campus_id) : '';
+  const canSelectTeacherCampus = Boolean(isRootAdminProfile && canReadCampuses);
+  const createTeacherFormDefaults = () => ({
+    ...teacherDefaults,
+    base_campus_id: defaultTeacherCampusId,
+  });
 
   const sectionAccess = useMemo(
     () => ({
       students: canReadStudents,
       students_list: canReadStudents,
+      transfers: canReadStudents,
       teachers: canReadTeachers,
       courses: canReadCoursesModule,
       campuses: canReadCampuses,
@@ -295,6 +310,7 @@ export default function ManagementPage() {
   const [courseTotal, setCourseTotal] = useState(0);
   const [hasFullTeachersLoaded, setHasFullTeachersLoaded] = useState(false);
   const [hasFullCoursesLoaded, setHasFullCoursesLoaded] = useState(false);
+  const [coursesScopeKey, setCoursesScopeKey] = useState('');
   const [campuses, setCampuses] = useState([]);
   const [periods, setPeriods] = useState([]);
   const [recentEnrollments, setRecentEnrollments] = useState([]);
@@ -302,7 +318,7 @@ export default function ManagementPage() {
   const [paymentConcepts, setPaymentConcepts] = useState([]);
 
   const [studentForm, setStudentForm] = useState(createStudentDefaults);
-  const [teacherForm, setTeacherForm] = useState(teacherDefaults);
+  const [teacherForm, setTeacherForm] = useState(createTeacherFormDefaults);
   const [courseForm, setCourseForm] = useState(courseDefaults);
   const [campusForm, setCampusForm] = useState(campusDefaults);
   const [periodForm, setPeriodForm] = useState(createPeriodDefaults);
@@ -330,6 +346,7 @@ export default function ManagementPage() {
   const deferredTeacherSearch = useDeferredValue(teacherSearch);
   const deferredCourseSearch = useDeferredValue(courseSearch);
   const deferredCampusSearch = useDeferredValue(campusSearch);
+  const courseSearchTerm = deferredCourseSearch.trim();
 
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
@@ -348,6 +365,11 @@ export default function ManagementPage() {
   const changeTab = useCallback(
     (nextTab, { replace = false } = {}) => {
       const resolvedTab = resolveTabKey(nextTab);
+      if (resolvedTab === 'transfers') {
+        navigate('/students?tab=transfers');
+        return;
+      }
+
       startTabTransition(() => setActiveTab(resolvedTab));
 
       const nextParams = new URLSearchParams(searchParams);
@@ -359,10 +381,15 @@ export default function ManagementPage() {
 
       setSearchParams(nextParams, { replace });
     },
-    [resolveTabKey, searchParams, setSearchParams],
+    [navigate, resolveTabKey, searchParams, setSearchParams],
   );
 
   useEffect(() => {
+    if (requestedSection === 'transfers') {
+      navigate('/students?tab=transfers', { replace: true });
+      return;
+    }
+
     const resolvedTab = resolveTabKey(requestedSection);
 
     if (resolvedTab !== activeTab) {
@@ -379,7 +406,7 @@ export default function ManagementPage() {
       }
       setSearchParams(nextParams, { replace: true });
     }
-  }, [activeTab, requestedSection, resolveTabKey, searchParams, setSearchParams]);
+  }, [activeTab, navigate, requestedSection, resolveTabKey, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!isRootAdminProfile && user?.base_campus_id) {
@@ -492,11 +519,12 @@ export default function ManagementPage() {
   );
 
   const loadCourses = useCallback(
-    async ({ search = '', campusId = null } = {}) => {
+    async ({ search = '', campusId = null, sort = 'NAME_ASC', pageSize = null, recentOnly = false } = {}) => {
       if (!canReadCourses) {
         setCourses([]);
         setCourseTotal(0);
         setHasFullCoursesLoaded(false);
+        setCoursesScopeKey('');
         return;
       }
 
@@ -506,9 +534,18 @@ export default function ManagementPage() {
           campusId === null || campusId === undefined || campusId === ''
             ? null
             : Number(campusId);
+        const normalizedPageSize =
+          Number.isInteger(pageSize) && pageSize > 0 ? pageSize : null;
+        const scopeKey = recentOnly
+          ? 'preview:recent'
+          : Number.isFinite(normalizedCampusId) && normalizedCampusId > 0
+            ? `campus:${normalizedCampusId}`
+            : 'all';
         const params = {
           q: search || undefined,
           campus_id: Number.isFinite(normalizedCampusId) && normalizedCampusId > 0 ? normalizedCampusId : undefined,
+          sort: sort || undefined,
+          page_size: normalizedPageSize || undefined,
         };
 
         const response = await api.get('/courses', {
@@ -521,7 +558,8 @@ export default function ManagementPage() {
 
         setCourses(items);
         setCourseTotal(total);
-        setHasFullCoursesLoaded(!search && !normalizedCampusId);
+        setHasFullCoursesLoaded(!search && !normalizedCampusId && !recentOnly && !normalizedPageSize);
+        setCoursesScopeKey(scopeKey);
       } catch (requestError) {
         setError(requestError.response?.data?.message || 'No se pudieron cargar los cursos.');
       } finally {
@@ -574,21 +612,52 @@ export default function ManagementPage() {
       setLoadingTeacherAssignments(true);
       try {
         const normalizedCourseCampusIds = Array.isArray(courseCampusIds)
-          ? courseCampusIds.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)
+          ? Array.from(
+              new Set(
+                courseCampusIds.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0),
+              ),
+            )
           : [];
         const shouldLoadFull = full || normalizedCourseCampusIds.length === 0;
         const scopeKey = shouldLoadFull ? 'full' : normalizedCourseCampusIds.join(',');
-        const params = {};
 
-        if (!shouldLoadFull) {
-          params.course_campus_ids = normalizedCourseCampusIds.join(',');
+        let items = [];
+        if (shouldLoadFull) {
+          const response = await api.get('/teachers/assignments', {
+            ...(canSelectEnrollmentCampus ? { _skipCampusScope: true } : {}),
+          });
+          items = response.data?.items || [];
+        } else {
+          const requestChunks = [];
+          for (let index = 0; index < normalizedCourseCampusIds.length; index += TEACHER_ASSIGNMENT_FILTER_CHUNK_SIZE) {
+            requestChunks.push(
+              normalizedCourseCampusIds.slice(index, index + TEACHER_ASSIGNMENT_FILTER_CHUNK_SIZE),
+            );
+          }
+
+          const responses = await Promise.all(
+            requestChunks.map((chunk) =>
+              api.get('/teachers/assignments', {
+                params: { course_campus_ids: chunk.join(',') },
+                ...(canSelectEnrollmentCampus ? { _skipCampusScope: true } : {}),
+              }),
+            ),
+          );
+
+          const mergedItems = [];
+          const seenIds = new Set();
+          for (const response of responses) {
+            for (const item of response.data?.items || []) {
+              const itemId = Number(item.id || 0);
+              if (itemId && seenIds.has(itemId)) continue;
+              if (itemId) seenIds.add(itemId);
+              mergedItems.push(item);
+            }
+          }
+          items = mergedItems;
         }
 
-        const response = await api.get('/teachers/assignments', {
-          params,
-          ...(canSelectEnrollmentCampus ? { _skipCampusScope: true } : {}),
-        });
-        setTeacherAssignments(response.data?.items || []);
+        setTeacherAssignments(items);
         setHasFullTeacherAssignmentsLoaded(shouldLoadFull);
         setTeacherAssignmentsScopeKey(scopeKey);
       } catch (requestError) {
@@ -621,6 +690,12 @@ export default function ManagementPage() {
   const isCoursesTabActive = activeTab === 'courses';
   const isCampusesTabActive = activeTab === 'campuses';
   const isPeriodsTabActive = activeTab === 'periods';
+  const shouldLoadRecentCoursesPreview = isRootAdminProfile && !courseCampusFilter && !courseSearchTerm;
+  const desiredCoursesScopeKey = shouldLoadRecentCoursesPreview
+    ? 'preview:recent'
+    : courseCampusFilter
+      ? `campus:${courseCampusFilter}`
+      : 'all';
   const visibleCourseOfferingIds = useMemo(
     () =>
       courses
@@ -668,6 +743,12 @@ export default function ManagementPage() {
   }, [deferredTeacherSearch, isTeachersTabActive, loadTeachers, teacherPage, teacherPageSize]);
 
   useEffect(() => {
+    if (!isTeachersTabActive || !canReadCampuses) return;
+    if (loadingCampuses || campuses.length > 0) return;
+    loadCampuses();
+  }, [campuses.length, canReadCampuses, isTeachersTabActive, loadCampuses, loadingCampuses]);
+
+  useEffect(() => {
     if (!isCampusesTabActive) return;
     if (!canReadCampuses || loadingCampuses || campuses.length > 0) return;
     loadCampuses();
@@ -684,11 +765,15 @@ export default function ManagementPage() {
     if (canReadCampuses && !loadingCampuses && campuses.length === 0) {
       loadCampuses();
     }
+    if (loadingCourses || coursesScopeKey === desiredCoursesScopeKey) return;
 
-    if (isRootAdminProfile && canReadCampuses && !courseCampusFilter) {
-      setCourses([]);
-      setCourseTotal(0);
-      setHasFullCoursesLoaded(false);
+    if (shouldLoadRecentCoursesPreview) {
+      loadCourses({
+        campusId: null,
+        sort: 'CREATED_DESC',
+        pageSize: RECENT_COURSES_PREVIEW_LIMIT,
+        recentOnly: true,
+      });
       return;
     }
 
@@ -698,11 +783,15 @@ export default function ManagementPage() {
     canReadCampuses,
     canReadCourses,
     courseCampusFilter,
-    isRootAdminProfile,
+    courseSearchTerm,
+    coursesScopeKey,
+    desiredCoursesScopeKey,
     isCoursesTabActive,
     loadCampuses,
     loadCourses,
     loadingCampuses,
+    loadingCourses,
+    shouldLoadRecentCoursesPreview,
   ]);
 
   useEffect(() => {
@@ -855,18 +944,29 @@ export default function ManagementPage() {
   const getPrimaryOffering = (course) => (course.offerings || [])[0] || null;
 
   const filteredCourses = useMemo(() => {
-    const term = deferredCourseSearch.trim().toLowerCase();
-    if (!term) return courses;
-    return courses.filter((course) => {
-      const offering = getPrimaryOffering(course);
-      const assignment = offering ? assignmentByOfferingId.get(String(offering.offering_id)) : null;
-      return `${course.name || ''} ${course.description || ''} ${course.duration_hours || ''} ${offering?.modality || ''} ${
-        assignment?.teacher_name || ''
-      }`
-        .toLowerCase()
-        .includes(term);
-    });
-  }, [assignmentByOfferingId, courses, deferredCourseSearch]);
+    const term = courseSearchTerm.toLowerCase();
+    const filtered = !term
+      ? [...courses]
+      : courses.filter((course) => {
+          const offering = getPrimaryOffering(course);
+          const assignment = offering ? assignmentByOfferingId.get(String(offering.offering_id)) : null;
+          return `${course.name || ''} ${course.description || ''} ${course.duration_hours || ''} ${offering?.modality || ''} ${
+            assignment?.teacher_name || ''
+          }`
+            .toLowerCase()
+            .includes(term);
+        });
+
+    if (isRootAdminProfile && !courseCampusFilter) {
+      filtered.sort((left, right) => {
+        const leftTime = new Date(left.created_at || 0).getTime();
+        const rightTime = new Date(right.created_at || 0).getTime();
+        return rightTime - leftTime;
+      });
+    }
+
+    return filtered;
+  }, [assignmentByOfferingId, courseCampusFilter, courseSearchTerm, courses, isRootAdminProfile]);
 
   const filteredCampuses = useMemo(() => {
     const term = deferredCampusSearch.trim().toLowerCase();
@@ -988,6 +1088,17 @@ export default function ManagementPage() {
     return '-';
   }, [campuses, effectiveEnrollmentCampusId, enrollmentCampusOptions, selectedEnrollmentOffering?.campus_name]);
 
+  const shouldShowTeacherCampusField = canSelectTeacherCampus || Boolean(teacherForm.base_campus_id);
+  const teacherCampusDisplayName = useMemo(() => {
+    const currentCampusId = String(teacherForm.base_campus_id || '');
+    if (!currentCampusId) return 'Sin sede base asignada';
+
+    const matchedCampus = campuses.find((campus) => String(campus.id) === currentCampusId);
+    if (matchedCampus?.name) return matchedCampus.name;
+    if (currentCampusId === String(defaultTeacherCampusId || '')) return 'Sede del usuario actual';
+    return `Sede #${currentCampusId}`;
+  }, [campuses, defaultTeacherCampusId, teacherForm.base_campus_id]);
+
   const normalizedInstallmentsCount = useMemo(
     () => normalizeInstallmentsCount(studentForm.installments_count),
     [studentForm.installments_count],
@@ -1012,6 +1123,10 @@ export default function ManagementPage() {
     : plannedInstallmentsFixedTotal;
 
   const plannedEnrollmentTotal = Number(studentForm.enrollment_fee_amount || 0) + plannedInstallmentsTotal;
+  const studentAgeLabel = useMemo(
+    () => formatAgeLabel(calculateAgeFromBirthDate(studentForm.birth_date)),
+    [studentForm.birth_date],
+  );
 
   const conceptIdsByName = useMemo(() => {
     const byName = {};
@@ -1189,7 +1304,7 @@ export default function ManagementPage() {
   };
 
   const resetTeacherForm = () => {
-    setTeacherForm(teacherDefaults);
+    setTeacherForm(createTeacherFormDefaults());
     setEditingTeacherId(null);
     setShowTeacherForm(false);
   };
@@ -1508,6 +1623,22 @@ export default function ManagementPage() {
     }
   };
 
+  const openStudentTransferFlow = useCallback(() => {
+    if (!canManageTransfers || !editingStudentId) return;
+    const transferRequestToken = `${editingStudentId}:${Date.now()}`;
+
+    navigate('/students', {
+      state: {
+        transferStudent: {
+          id: editingStudentId,
+          first_name: studentForm.first_name,
+          last_name: studentForm.last_name,
+        },
+        transferRequestToken,
+      },
+    });
+  }, [canManageTransfers, editingStudentId, navigate, studentForm.first_name, studentForm.last_name]);
+
   const submitTeacher = async (event) => {
     event.preventDefault();
     if (!canCreateTeachers && !canManageTeacherProfile) return;
@@ -1516,7 +1647,25 @@ export default function ManagementPage() {
     setError('');
     setMessage('');
 
+    const normalizedEmail = teacherForm.email.trim().toLowerCase();
+    const useEmailAsPassword = !editingTeacherId && Boolean(teacherForm.use_email_as_password);
+    const resolvedPassword = useEmailAsPassword ? normalizedEmail : teacherForm.password;
+
+    if (useEmailAsPassword && normalizedEmail.length < 8) {
+      setError('El correo debe tener al menos 8 caracteres para usarlo como contraseña temporal.');
+      setSaving(false);
+      return;
+    }
+
+    if (!editingTeacherId && !useEmailAsPassword && teacherForm.password.trim().length < 8) {
+      setError('La contraseña del docente debe tener al menos 8 caracteres.');
+      setSaving(false);
+      return;
+    }
+
     try {
+      const nextBaseCampusId = teacherForm.base_campus_id ? Number(teacherForm.base_campus_id) : null;
+
       if (editingTeacherId) {
         const payload = {
           first_name: teacherForm.first_name.trim(),
@@ -1530,6 +1679,16 @@ export default function ManagementPage() {
           payload.password = teacherForm.password;
         }
         await api.patch(`/teachers/${editingTeacherId}`, payload);
+
+        const currentTeacher = teachers.find((teacher) => String(teacher.id) === String(editingTeacherId));
+        const currentBaseCampusId = currentTeacher?.base_campus_id || null;
+        if (canManageAssignments && String(currentBaseCampusId || '') !== String(nextBaseCampusId || '')) {
+          await api.patch(`/teachers/${editingTeacherId}/base-campus`, {
+            base_campus_id: nextBaseCampusId,
+            reason: null,
+          });
+        }
+
         setMessage('Docente actualizado correctamente.');
       } else {
         await api.post('/auth/register', {
@@ -1538,9 +1697,11 @@ export default function ManagementPage() {
           document_number: buildDocumentValue(teacherForm.document_type, teacherForm.document_number),
           phone: normalizeOptional(teacherForm.phone),
           address: normalizeOptional(teacherForm.address),
-          email: teacherForm.email.trim().toLowerCase(),
-          password: teacherForm.password,
+          email: normalizedEmail,
+          password: resolvedPassword,
           roles: ['DOCENTE'],
+          base_campus_id: nextBaseCampusId,
+          must_change_password: useEmailAsPassword,
         });
         setMessage('Docente creado correctamente.');
       }
@@ -1572,6 +1733,8 @@ export default function ManagementPage() {
       address: teacher.address || '',
       email: teacher.email || '',
       password: '',
+      base_campus_id: teacher.base_campus_id ? String(teacher.base_campus_id) : '',
+      use_email_as_password: false,
     });
     setShowTeacherForm(true);
   };
@@ -1884,12 +2047,6 @@ export default function ManagementPage() {
     }
   };
 
-  const openCertificateGenerator = () => {
-    const version = Date.now();
-    window.open(`/certificado-pdf.html?v=${version}`, '_blank', 'noopener,noreferrer');
-  };
-
-
   if (!firstEnabledTab) {
     return (
       <section className="card">
@@ -2019,13 +2176,25 @@ export default function ManagementPage() {
                   onChange={(event) => setStudentForm((prev) => ({ ...prev, document_number: event.target.value }))}
                   required
                 />
-                <input
-                  type="date"
-                  className="app-input"
-                  value={studentForm.birth_date}
-                  onChange={(event) => setStudentForm((prev) => ({ ...prev, birth_date: event.target.value }))}
-                  required
-                />
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Fecha de nacimiento</span>
+                  <input
+                    type="date"
+                    className="app-input"
+                    value={studentForm.birth_date}
+                    onChange={(event) => setStudentForm((prev) => ({ ...prev, birth_date: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Edad</span>
+                  <input
+                    className="app-input"
+                    value={studentAgeLabel}
+                    placeholder="Se calcula automáticamente"
+                    readOnly
+                  />
+                </label>
                 <input
                   type="email"
                   className="app-input"
@@ -2049,7 +2218,18 @@ export default function ManagementPage() {
 
               {editingStudentId ? (
                 <div className="space-y-3 rounded-xl border border-primary-200 bg-white p-3">
-                  <h3 className="text-sm font-semibold text-primary-900">Acceso al sistema</h3>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold text-primary-900">Acceso al sistema</h3>
+                    {canManageTransfers ? (
+                      <button
+                        type="button"
+                        onClick={openStudentTransferFlow}
+                        className="rounded-lg border border-accent-300 bg-white px-3 py-1.5 text-xs font-semibold text-accent-700 hover:bg-accent-50"
+                      >
+                        TRASLADO
+                      </button>
+                    ) : null}
+                  </div>
                   {studentForm.access_user_id ? (
                     canManageStudentAccess ? (
                       <>
@@ -2588,7 +2768,11 @@ export default function ManagementPage() {
                 type="button"
                 onClick={() => {
                   if (showTeacherForm) resetTeacherForm();
-                  else setShowTeacherForm(true);
+                  else {
+                    setEditingTeacherId(null);
+                    setTeacherForm(createTeacherFormDefaults());
+                    setShowTeacherForm(true);
+                  }
                 }}
                 className="rounded-xl bg-primary-700 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-800"
               >
@@ -2649,6 +2833,28 @@ export default function ManagementPage() {
                   onChange={(event) => setTeacherForm((prev) => ({ ...prev, phone: event.target.value }))}
                   required
                 />
+                {shouldShowTeacherCampusField ? (
+                  canSelectTeacherCampus ? (
+                    <select
+                      className="app-input"
+                      value={teacherForm.base_campus_id}
+                      onChange={(event) =>
+                        setTeacherForm((prev) => ({ ...prev, base_campus_id: event.target.value }))
+                      }
+                      required={!editingTeacherId}
+                      disabled={Boolean(editingTeacherId && !canManageAssignments)}
+                    >
+                      <option value="">{editingTeacherId ? 'Sin sede base' : 'Selecciona una sede base'}</option>
+                      {campuses.map((campus) => (
+                        <option key={campus.id} value={campus.id}>
+                          {campus.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input className="app-input" value={teacherCampusDisplayName} readOnly disabled />
+                  )
+                ) : null}
                 <input
                   type="email"
                   className="app-input"
@@ -2657,13 +2863,32 @@ export default function ManagementPage() {
                   onChange={(event) => setTeacherForm((prev) => ({ ...prev, email: event.target.value }))}
                   required
                 />
+                {!editingTeacherId ? (
+                  <label className="flex items-center gap-2 rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-sm text-primary-800 sm:col-span-2 lg:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(teacherForm.use_email_as_password)}
+                      onChange={(event) =>
+                        setTeacherForm((prev) => ({ ...prev, use_email_as_password: event.target.checked }))
+                      }
+                    />
+                    <span>Usar el correo como contraseña temporal y pedir cambio en el primer ingreso.</span>
+                  </label>
+                ) : null}
                 <input
                   type="password"
                   className="app-input"
-                  placeholder={editingTeacherId ? 'Nueva contraseña (opcional)' : 'Contraseña'}
+                  placeholder={
+                    editingTeacherId
+                      ? 'Nueva contraseña (opcional)'
+                      : teacherForm.use_email_as_password
+                        ? 'Se usará el correo como contraseña temporal'
+                        : 'Contraseña'
+                  }
                   value={teacherForm.password}
                   onChange={(event) => setTeacherForm((prev) => ({ ...prev, password: event.target.value }))}
                   required={!editingTeacherId}
+                  disabled={!editingTeacherId && Boolean(teacherForm.use_email_as_password)}
                 />
                 <input
                   className="app-input sm:col-span-2 lg:col-span-4"
@@ -2704,6 +2929,7 @@ export default function ManagementPage() {
                   <th className="pb-2 pr-3">Nro. doc.</th>
                   <th className="pb-2 pr-3">Telefono</th>
                   <th className="pb-2 pr-3">Correo</th>
+                  <th className="pb-2 pr-3">Sede base</th>
                   <th className="pb-2 pr-3">Estado</th>
                   <th className="pb-2">Acciones</th>
                 </tr>
@@ -2720,6 +2946,7 @@ export default function ManagementPage() {
                     <td className="py-2 pr-3">{parsedDocument.document_number || '-'}</td>
                     <td className="py-2 pr-3">{teacher.phone || '-'}</td>
                     <td className="py-2 pr-3">{teacher.email}</td>
+                    <td className="py-2 pr-3">{teacher.base_campus_name || '-'}</td>
                     <td className="py-2 pr-3">
                       <span
                         className={`rounded-full px-2 py-1 text-xs font-semibold ${
@@ -2765,7 +2992,7 @@ export default function ManagementPage() {
                 })}
                 {!loadingTeachers && teachers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-4 text-center text-sm text-primary-600">
+                    <td colSpan={8} className="py-4 text-center text-sm text-primary-600">
                       No se encontraron docentes.
                     </td>
                   </tr>
@@ -3050,28 +3277,17 @@ export default function ManagementPage() {
       {activeTab === 'payments' && canReadPayments ? <PaymentsPage /> : null}
 
       {activeTab === 'certificates' && canReadPayments ? (
-        <article className="card space-y-4">
+        <article className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-primary-900">Generación de certificados</h2>
               <p className="text-sm text-primary-700">
-                Abre el generador oficial en una pestaña nueva para completar datos, imprimir o guardar en PDF.
+                Configura primero los datos del certificado y luego abre el generador con toda la información precargada.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={openCertificateGenerator}
-              className="rounded-xl bg-primary-700 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-800"
-            >
-              Abrir generador
-            </button>
           </div>
 
-          <div className="panel-soft">
-            <p className="text-sm text-primary-800">
-              El formato oficial del certificado se carga por defecto, incluyendo imagen de fondo, sellos y firmas.
-            </p>
-          </div>
+          <CertificateGeneratorLauncher />
         </article>
       ) : null}
 
@@ -3110,7 +3326,7 @@ export default function ManagementPage() {
                   onChange={(event) => setCourseCampusFilter(event.target.value)}
                   disabled={loadingCampuses || (!isRootAdminProfile && Boolean(user?.base_campus_id))}
                 >
-                  <option value="">{isRootAdminProfile ? 'Selecciona una sede' : 'Filtrar por sede'}</option>
+                  <option value="">{isRootAdminProfile ? 'Todas las sedes' : 'Filtrar por sede'}</option>
                   {campuses.map((campus) => (
                     <option key={campus.id} value={campus.id}>
                       {campus.name}
@@ -3325,9 +3541,10 @@ export default function ManagementPage() {
 
           {canReadCourses ? (
             <>
-              {isRootAdminProfile && canReadCampuses && !courseCampusFilter ? (
+              {coursesScopeKey === 'preview:recent' ? (
                 <p className="rounded-xl bg-primary-50 px-3 py-2 text-sm text-primary-800">
-                  Selecciona una sede para cargar los cursos.
+                  Mostrando los {RECENT_COURSES_PREVIEW_LIMIT} cursos creados más recientemente de todas las sedes.
+                  Si eliges una sede o buscas un curso, se cargará el listado completo que corresponda.
                 </p>
               ) : null}
               {loadingCourses ? <p className="text-sm text-primary-700">Cargando cursos...</p> : null}
@@ -3399,9 +3616,7 @@ export default function ManagementPage() {
                         </tr>
                       );
                     })}
-                    {!loadingCourses &&
-                    filteredCourses.length === 0 &&
-                    (!isRootAdminProfile || !canReadCampuses || Boolean(courseCampusFilter)) ? (
+                    {!loadingCourses && filteredCourses.length === 0 ? (
                       <tr>
                         <td colSpan={9} className="py-4 text-center text-sm text-primary-600">
                           No se encontraron cursos.

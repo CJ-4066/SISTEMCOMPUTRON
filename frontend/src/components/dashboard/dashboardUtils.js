@@ -8,6 +8,8 @@ const PAYMENT_METHOD_LABELS = {
   YAPE: 'Yape',
   TRANSFERENCIA: 'Transferencia',
   QR: 'QR',
+  TARJETA: 'Tarjeta',
+  CANJE: 'Canje',
   EFECTIVO: 'Efectivo',
   OTRO: 'Otro',
 };

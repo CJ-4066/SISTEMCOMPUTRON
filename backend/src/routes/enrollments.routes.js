@@ -107,6 +107,26 @@ router.post(
       [student_id, course_campus_id, period_id, enrollment_date, status, req.user.id],
     );
 
+    if (status === 'ACTIVE') {
+      const campusResult = await query(
+        `SELECT campus_id
+         FROM course_campus
+         WHERE id = $1
+         LIMIT 1`,
+        [course_campus_id],
+      );
+
+      if (campusResult.rowCount > 0) {
+        await query(
+          `UPDATE students
+           SET assigned_campus_id = $1,
+               updated_at = NOW()
+           WHERE id = $2`,
+          [campusResult.rows[0].campus_id, student_id],
+        );
+      }
+    }
+
     return res.status(201).json({ message: 'Matrícula creada.', item: rows[0] });
   }),
 );

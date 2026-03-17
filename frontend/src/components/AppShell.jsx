@@ -88,6 +88,8 @@ export default function AppShell() {
     user?.email?.trim().toLowerCase() === '2222@gmail.com' && roles.includes('DOCENTE');
   const isDashboardRoute = location.pathname === '/';
   const isManagementRoute = location.pathname === '/management';
+  const activeStudentTab = location.pathname === '/students' ? new URLSearchParams(location.search).get('tab') : null;
+  const isStudentTransfersRoute = location.pathname === '/students' && activeStudentTab === 'transfers';
   const activeCoursesTab = location.pathname === '/courses' ? new URLSearchParams(location.search).get('tab') : null;
   const isAttendanceTabActive = activeCoursesTab === 'attendance';
   const isCourseWorkspaceRoute = location.pathname.startsWith('/courses/salon/');
@@ -163,10 +165,10 @@ export default function AppShell() {
   }, [isDashboardRoute]);
 
   useEffect(() => {
-    if (!isManagementRoute) {
+    if (!isManagementRoute && !isStudentTransfersRoute) {
       setIsManagementExpanded(false);
     }
-  }, [isManagementRoute]);
+  }, [isManagementRoute, isStudentTransfersRoute]);
 
   const handleLogout = async () => {
     await logout();
@@ -304,7 +306,7 @@ export default function AppShell() {
                     onFocus={() => preloadRoute('/management')}
                     className={
                       `block rounded-xl px-3 py-2 text-sm font-medium transition ${
-                        isManagementRoute || isManagementExpanded
+                        isManagementRoute || isStudentTransfersRoute || isManagementExpanded
                           ? 'bg-primary-500 text-white'
                           : 'text-primary-100 hover:bg-primary-800 hover:text-white'
                       }`
@@ -323,14 +325,16 @@ export default function AppShell() {
                   >
                     <div className="ml-3 space-y-1 border-l border-primary-700/80 pl-3 pt-1">
                       {visibleManagementItems.map((item) => {
-                        const isSubItemActive = activeManagementSection === item.key;
+                        const isSubItemActive =
+                          item.key === 'transfers' ? isStudentTransfersRoute : activeManagementSection === item.key;
+                        const itemPath = buildManagementSectionPath(item.key);
                         return (
                           <NavLink
                             key={item.key}
-                            to={buildManagementSectionPath(item.key)}
+                            to={itemPath}
                             onClick={() => setOpen(false)}
-                            onMouseEnter={() => preloadRoute('/management')}
-                            onFocus={() => preloadRoute('/management')}
+                            onMouseEnter={() => preloadRoute(itemPath)}
+                            onFocus={() => preloadRoute(itemPath)}
                             className={() =>
                               `block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${
                                 isSubItemActive

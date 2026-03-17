@@ -3,12 +3,14 @@ import { PERMISSIONS } from '../../constants/permissions';
 export const AVAILABLE_ROLES = ['ADMIN', 'DIRECTOR', 'SECRETARIADO', 'DOCENTE', 'ALUMNO'];
 export const USER_PAGE_SIZE = 8;
 export const ROLE_ADMIN = 'ADMIN';
+export const DEFAULT_CREATE_ROLE = 'SECRETARIADO';
 
 export const INITIAL_CREDENTIAL_FORM = {
   first_name: '',
   last_name: '',
   email: '',
   password: '',
+  use_email_as_password: false,
   document_type: 'DNI',
   document_number: '',
   phone: '',

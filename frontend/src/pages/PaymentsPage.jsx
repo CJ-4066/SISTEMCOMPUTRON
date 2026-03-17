@@ -16,6 +16,8 @@ const PAYMENT_METHOD_LABELS = {
   YAPE: 'Yape',
   TRANSFERENCIA: 'Transferencia',
   QR: 'QR',
+  TARJETA: 'Tarjeta',
+  CANJE: 'Canje',
   EFECTIVO: 'Efectivo',
   OTRO: 'Otro',
 };
@@ -489,7 +491,7 @@ function StaffPaymentsPage() {
         saldo_favor: round2(item.overpayment_amount).toFixed(2),
         metodo: toPaymentMethodLabel(item.method),
         estado: toPaymentStatusLabel(item.status),
-        referencia: item.reference_code || '',
+        numero_operacion: item.reference_code || '',
         evidencia: item.no_evidence ? 'Sin evidencia (marcado)' : item.evidence_name || '',
       }));
 
@@ -506,7 +508,7 @@ function StaffPaymentsPage() {
           { key: 'saldo_favor', label: 'Saldo a favor' },
           { key: 'metodo', label: 'Método' },
           { key: 'estado', label: 'Estado' },
-          { key: 'referencia', label: 'Referencia' },
+          { key: 'numero_operacion', label: 'Número de operación' },
           { key: 'evidencia', label: 'Evidencia' },
         ],
         rows,
@@ -656,6 +658,10 @@ function StaffPaymentsPage() {
         throw new Error('Ingresa un monto válido para el pago.');
       }
 
+      if (!form.reference_code.trim()) {
+        throw new Error('Ingresa el número de operación.');
+      }
+
       if (allocationByEnrollment.length === 0) {
         throw new Error('El monto ingresado no se puede aplicar a cuotas pendientes.');
       }
@@ -698,7 +704,7 @@ function StaffPaymentsPage() {
           enrollment_id: Number(group.enrollment_id),
           method: form.method,
           status: 'COMPLETED',
-          reference_code: form.reference_code.trim() || null,
+          reference_code: form.reference_code.trim(),
           notes: mergedNotes,
           amount_received: groupReceived,
           evidence_name: evidenceName,
@@ -774,6 +780,7 @@ function StaffPaymentsPage() {
           <td className="py-2 pr-3">S/ {round2(payment.amount_received).toFixed(2)}</td>
           <td className="py-2 pr-3">S/ {round2(payment.overpayment_amount).toFixed(2)}</td>
           <td className="py-2 pr-3">{toPaymentMethodLabel(payment.method)}</td>
+          <td className="py-2 pr-3">{payment.reference_code || '-'}</td>
           <td className="py-2 pr-3">
             {payment.no_evidence ? (
               <span className="text-xs font-semibold text-amber-700">Sin evidencia (marcado)</span>
@@ -934,15 +941,18 @@ function StaffPaymentsPage() {
               <option value="YAPE">Yape</option>
               <option value="TRANSFERENCIA">Transferencia</option>
               <option value="QR">QR</option>
+              <option value="TARJETA">Tarjeta</option>
+              <option value="CANJE">Canje</option>
               <option value="EFECTIVO">Efectivo</option>
               <option value="OTRO">Otro</option>
             </select>
 
             <input
               className="app-input lg:col-span-2"
-              placeholder="Referencia (opcional)"
+              placeholder="Número de operación"
               value={form.reference_code}
               onChange={(event) => setForm((prev) => ({ ...prev, reference_code: event.target.value }))}
+              required
             />
 
             <input
@@ -1217,6 +1227,7 @@ function StaffPaymentsPage() {
                 <th className="pb-2 pr-3">Recibido</th>
                 <th className="pb-2 pr-3">Saldo favor</th>
                 <th className="pb-2 pr-3">Método</th>
+                <th className="pb-2 pr-3">N° operación</th>
                 <th className="pb-2 pr-3">Evidencia</th>
                 <th className="pb-2 pr-3">Estado</th>
                 <th className="pb-2">Acción</th>
@@ -1227,7 +1238,7 @@ function StaffPaymentsPage() {
 
               {!loadingPayments && payments.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-4 text-center text-sm text-primary-600">
+                  <td colSpan={12} className="py-4 text-center text-sm text-primary-600">
                     No se encontraron pagos con los filtros seleccionados.
                   </td>
                 </tr>

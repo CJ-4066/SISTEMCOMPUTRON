@@ -7,9 +7,24 @@ const PAYMENT_STATUS_LABELS = {
   REJECTED: 'Rechazado',
 };
 
+const PAYMENT_METHOD_LABELS = {
+  YAPE: 'Yape',
+  TRANSFERENCIA: 'Transferencia',
+  QR: 'QR',
+  TARJETA: 'Tarjeta',
+  CANJE: 'Canje',
+  EFECTIVO: 'Efectivo',
+  OTRO: 'Otro',
+};
+
 const toPaymentStatusLabel = (status) => {
   const key = String(status || '').toUpperCase();
   return PAYMENT_STATUS_LABELS[key] || status || '-';
+};
+
+const toPaymentMethodLabel = (method) => {
+  const key = String(method || '').toUpperCase();
+  return PAYMENT_METHOD_LABELS[key] || method || '-';
 };
 
 const formatDate = (value) => {
@@ -152,7 +167,7 @@ export default function StudentPaymentsPage() {
                 <td className="py-2 pr-3">{formatDate(payment.payment_date)}</td>
                 <td className="py-2 pr-3">{payment.course_name}</td>
                 <td className="py-2 pr-3">S/ {Number(payment.total_amount || 0).toFixed(2)}</td>
-                <td className="py-2 pr-3">{payment.method}</td>
+                <td className="py-2 pr-3">{toPaymentMethodLabel(payment.method)}</td>
                 <td className="py-2">{toPaymentStatusLabel(payment.status)}</td>
               </tr>
             ))}

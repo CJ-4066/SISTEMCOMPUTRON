@@ -25,7 +25,7 @@ const {
 const router = express.Router();
 
 const PAYMENT_STATUS = ['PENDING', 'COMPLETED', 'REJECTED'];
-const PAYMENT_METHODS = ['YAPE', 'TRANSFERENCIA', 'QR', 'EFECTIVO', 'OTRO'];
+const PAYMENT_METHODS = ['YAPE', 'TRANSFERENCIA', 'QR', 'TARJETA', 'CANJE', 'EFECTIVO', 'OTRO'];
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida (YYYY-MM-DD)');
 const PAYMENT_EVIDENCE_MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const booleanQuery = z.preprocess((value) => {
@@ -92,7 +92,7 @@ const createPaymentSchema = z.object({
       enrollment_id: z.number().int().positive(),
       method: z.enum(PAYMENT_METHODS),
       status: z.enum(PAYMENT_STATUS).optional().default('COMPLETED'),
-      reference_code: z.string().max(120).nullable().optional(),
+      reference_code: z.string().trim().min(1, 'El número de operación es obligatorio.').max(120),
       notes: z.string().max(400).nullable().optional(),
       amount_received: z.number().positive().optional(),
       evidence_name: z.string().trim().max(180).nullable().optional(),
@@ -729,7 +729,7 @@ router.post(
       enrollment_id,
       method,
       status = 'COMPLETED',
-      reference_code = null,
+      reference_code,
       notes = null,
       amount_received = undefined,
       evidence_name = null,
@@ -790,6 +790,7 @@ router.post(
 
       const normalizedEvidenceName = evidence_name?.trim() || null;
       const normalizedEvidenceUrl = evidence_url?.trim() || null;
+      const normalizedReferenceCode = reference_code.trim();
       const receivedAmount = Number(amount_received ?? totalAmount);
       const roundedReceivedAmount = Number(receivedAmount.toFixed(2));
       const roundedTotalAmount = Number(totalAmount.toFixed(2));
@@ -851,7 +852,7 @@ router.post(
           roundedReceivedAmount,
           overpaymentAmount,
           method,
-          reference_code,
+          normalizedReferenceCode,
           status,
           notes,
           normalizedEvidenceName,

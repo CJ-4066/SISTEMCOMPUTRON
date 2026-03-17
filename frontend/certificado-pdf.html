@@ -766,6 +766,8 @@
       (() => {
         const queryParams = new URLSearchParams(window.location.search);
         const isEmbedded = queryParams.get("embed") === "1";
+        const shouldAutoDownload = queryParams.get("download") === "1";
+        const skipLibraryRegistration = queryParams.get("source") === "library";
         const form = document.getElementById("certificateForm");
         const certificateSheet = document.getElementById("certificateSheet");
         const templateImage = document.getElementById("templateImage");
@@ -779,9 +781,11 @@
 
         const state = {
           photoObjectUrl: null,
-          exportingPdf: false
+          exportingPdf: false,
+          draftCampusId: null
         };
         const AUTH_STORAGE_KEY = "computron_auth";
+        const CERTIFICATE_DRAFT_STORAGE_PREFIX = "computron:certificate-generator-draft:";
 
         const defaults = {
           studentNameInput: "Nombre del alumno",
@@ -826,6 +830,9 @@
           const hours = Number.parseInt(rawHours, 10);
           const auth = readStoredAuth();
           const baseCampusId = Number(auth?.user?.base_campus_id || 0);
+          const draftCampusId = Number(state.draftCampusId || 0);
+          const resolvedCampusId =
+            draftCampusId > 0 ? draftCampusId : baseCampusId > 0 ? baseCampusId : null;
 
           return {
             certificate_code: getInputValue("certCodeInput") || null,
@@ -839,11 +846,13 @@
             issue_date: getInputValue("issueDateInput") || null,
             city: getInputValue("cityInput") || null,
             organization: getInputValue("organizationInput") || null,
-            campus_id: baseCampusId > 0 ? baseCampusId : null
+            campus_id: resolvedCampusId
           };
         };
 
         const registerCertificateInLibrary = () => {
+          if (skipLibraryRegistration) return;
+
           const auth = readStoredAuth();
           const accessToken = auth?.accessToken || "";
           const payload = buildLibraryPayload();
@@ -1018,6 +1027,70 @@
           });
         };
 
+        const readDraftPayload = () => {
+          const draftId = queryParams.get("draft_id");
+          if (!draftId) return null;
+
+          try {
+            const raw = localStorage.getItem(`${CERTIFICATE_DRAFT_STORAGE_PREFIX}${draftId}`);
+            return raw ? JSON.parse(raw) : null;
+          } catch (_error) {
+            return null;
+          }
+        };
+
+        const applyPhotoSource = (src) => {
+          if (!src) {
+            photoView.removeAttribute("src");
+            photoSlot.classList.remove("has-photo");
+            return;
+          }
+
+          photoView.src = src;
+          photoSlot.classList.add("has-photo");
+        };
+
+        const applyDraftPayload = () => {
+          const draft = readDraftPayload();
+          if (!draft) return;
+
+          state.draftCampusId = Number(draft.campus_id || 0) || null;
+
+          const mapping = {
+            student_name: "studentNameInput",
+            student_document: "studentDocInput",
+            certificate_code: "certCodeInput",
+            course_name: "courseInput",
+            hours_academic: "hoursInput",
+            modality: "modalityInput",
+            start_date: "startDateInput",
+            end_date: "endDateInput",
+            issue_date: "issueDateInput",
+            city: "cityInput",
+            organization: "organizationInput"
+          };
+
+          Object.entries(mapping).forEach(([draftKey, inputId]) => {
+            const value = draft[draftKey];
+            if (value !== undefined && value !== null && value !== "") {
+              setInputValue(inputId, String(value));
+            }
+          });
+
+          if (draft.photo_data_url) {
+            revokeObjectUrl("photoObjectUrl");
+            applyPhotoSource(draft.photo_data_url);
+          }
+        };
+
+        const triggerAutoDownload = () => {
+          if (!shouldAutoDownload) return;
+
+          window.setTimeout(() => {
+            exportCertificatePdf();
+          }, 150);
+        };
+
         const openControls = () => {
           document.body.classList.add("embed-controls-open");
           window.setTimeout(() => {
@@ -1108,14 +1181,12 @@
         const handlePhotoUpload = (file) => {
           revokeObjectUrl("photoObjectUrl");
           if (!file) {
-            photoView.removeAttribute("src");
-            photoSlot.classList.remove("has-photo");
+            applyPhotoSource("");
             return;
           }
           const objectUrl = URL.createObjectURL(file);
           state.photoObjectUrl = objectUrl;
-          photoView.src = objectUrl;
-          photoSlot.classList.add("has-photo");
+          applyPhotoSource(objectUrl);
         };
 
         const updatePreview = () => {
@@ -1197,8 +1268,11 @@
 
         applyOfficialTemplate();
 
-        parseQueryParams();
         loadDefaults();
+        parseQueryParams();
+        applyDraftPayload();
+        updatePreview();
+        triggerAutoDownload();
       })();
     </script>
   </body>

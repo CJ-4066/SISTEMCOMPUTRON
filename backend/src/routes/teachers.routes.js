@@ -488,6 +488,7 @@ router.patch(
       const passwordHash = await bcrypt.hash(password, 12);
       values.push(passwordHash);
       fields.push(`password_hash = $${values.length}`);
+      fields.push(`must_change_password = FALSE`);
     }
 
     values.push(teacherUserId);

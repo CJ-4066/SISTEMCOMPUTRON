@@ -12,6 +12,11 @@ export const MANAGEMENT_SECTION_ITEMS = [
     permissions: [PERMISSIONS.STUDENTS_VIEW, PERMISSIONS.STUDENTS_MANAGE],
   },
   {
+    key: 'transfers',
+    label: 'Traslados',
+    permissions: [PERMISSIONS.STUDENTS_VIEW, PERMISSIONS.STUDENTS_MANAGE],
+  },
+  {
     key: 'teachers',
     label: 'Docentes',
     permissions: [PERMISSIONS.TEACHERS_VIEW, PERMISSIONS.USERS_CREATE, PERMISSIONS.USERS_STATUS_MANAGE],
@@ -44,6 +49,10 @@ export const MANAGEMENT_SECTION_ITEMS = [
 ];
 
 export const buildManagementSectionPath = (sectionKey) => {
+  if (sectionKey === 'transfers') {
+    return '/students?tab=transfers';
+  }
+
   const params = new URLSearchParams();
   if (sectionKey) {
     params.set('section', sectionKey);

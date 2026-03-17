@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
+import { calculateAgeFromBirthDate, formatAgeLabel } from '../utils/age';
 
 const getTodayIsoDate = () => {
   const now = new Date();
@@ -170,6 +171,11 @@ export default function EnrollmentsPage() {
     }
     return all;
   }, [courses]);
+
+  const quickEnrollmentAgeLabel = useMemo(
+    () => formatAgeLabel(calculateAgeFromBirthDate(quickEnrollmentForm.student_birth_date)),
+    [quickEnrollmentForm.student_birth_date],
+  );
 
   const submitPeriod = async (event) => {
     event.preventDefault();
@@ -467,15 +473,27 @@ export default function EnrollmentsPage() {
                   }
                   required
                 />
-                <input
-                  type="date"
-                  className="app-input"
-                  value={quickEnrollmentForm.student_birth_date}
-                  onChange={(event) =>
-                    setQuickEnrollmentForm((prev) => ({ ...prev, student_birth_date: event.target.value }))
-                  }
-                  required
-                />
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Fecha de nacimiento</span>
+                  <input
+                    type="date"
+                    className="app-input"
+                    value={quickEnrollmentForm.student_birth_date}
+                    onChange={(event) =>
+                      setQuickEnrollmentForm((prev) => ({ ...prev, student_birth_date: event.target.value }))
+                    }
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Edad</span>
+                  <input
+                    className="app-input"
+                    value={quickEnrollmentAgeLabel}
+                    placeholder="Se calcula automáticamente"
+                    readOnly
+                  />
+                </label>
                 <input
                   type="email"
                   className="app-input"
@@ -592,15 +610,21 @@ export default function EnrollmentsPage() {
                   ))}
                 </select>
 
-                <input
-                  type="date"
-                  className="app-input"
-                  value={quickEnrollmentForm.enrollment_date}
-                  onChange={(event) =>
-                    setQuickEnrollmentForm((prev) => ({ ...prev, enrollment_date: event.target.value }))
-                  }
-                />
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Fecha de matrícula</span>
+                  <input
+                    type="date"
+                    className="app-input"
+                    value={quickEnrollmentForm.enrollment_date}
+                    onChange={(event) =>
+                      setQuickEnrollmentForm((prev) => ({ ...prev, enrollment_date: event.target.value }))
+                    }
+                  />
+                </label>
               </div>
+              <p className="text-xs text-primary-600">
+                La fecha de matrícula es el día en que se registra la inscripción del alumno.
+              </p>
 
               <div className="flex gap-2">
                 <button className="rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700">
@@ -666,13 +690,22 @@ export default function EnrollmentsPage() {
                   ))}
                 </select>
 
-                <input
-                  type="date"
-                  className="app-input"
-                  value={enrollmentForm.enrollment_date}
-                  onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, enrollment_date: event.target.value }))}
-                />
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Fecha de matrícula</span>
+                  <input
+                    type="date"
+                    className="app-input"
+                    value={enrollmentForm.enrollment_date}
+                    onChange={(event) =>
+                      setEnrollmentForm((prev) => ({ ...prev, enrollment_date: event.target.value }))
+                    }
+                  />
+                </label>
               </div>
+
+              <p className="text-xs text-primary-600">
+                Esta fecha corresponde a la inscripción, no a la fecha de nacimiento del alumno.
+              </p>
 
               <button className="rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700">
                 Guardar matricula

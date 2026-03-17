@@ -20,6 +20,36 @@ const toLocalDate = (value) => {
   return date.toLocaleDateString();
 };
 
+const buildCertificateDownloadUrl = (item) => {
+  const params = new URLSearchParams({
+    v: `${Date.now()}`,
+    download: '1',
+    source: 'library',
+  });
+
+  const fieldMappings = {
+    nombre: item.student_name,
+    documento: item.student_document,
+    codigo: item.certificate_code,
+    curso: item.course_name,
+    horas: item.hours_academic,
+    modalidad: item.modality,
+    inicio: item.start_date,
+    fin: item.end_date,
+    emision: item.issue_date,
+    ciudad: item.city,
+    institucion: item.organization,
+  };
+
+  Object.entries(fieldMappings).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value));
+    }
+  });
+
+  return `/certificado-pdf.html?${params.toString()}`;
+};
+
 export default function CertificateLibraryPage() {
   const { hasPermission } = useAuth();
   const canViewLibrary = hasPermission(PERMISSIONS.PAYMENTS_VIEW) || hasPermission(PERMISSIONS.PAYMENTS_MANAGE);
@@ -87,6 +117,10 @@ export default function CertificateLibraryPage() {
     setPage(1);
   };
 
+  const handleDownload = (item) => {
+    window.open(buildCertificateDownloadUrl(item), '_blank', 'noopener,noreferrer');
+  };
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   if (!canViewLibrary) {
@@ -136,7 +170,8 @@ export default function CertificateLibraryPage() {
               <th className="pb-2 pr-3">Fecha de emisión</th>
               <th className="pb-2 pr-3">Registrado</th>
               <th className="pb-2 pr-3">Creado por</th>
-              <th className="pb-2">Sede</th>
+              <th className="pb-2 pr-3">Sede</th>
+              <th className="pb-2">Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -151,13 +186,22 @@ export default function CertificateLibraryPage() {
                 <td className="py-2 pr-3">{toLocalDate(item.issue_date)}</td>
                 <td className="py-2 pr-3">{toLocalDateTime(item.created_at)}</td>
                 <td className="py-2 pr-3">{item.created_by_name || '-'}</td>
-                <td className="py-2">{item.campus_name || '-'}</td>
+                <td className="py-2 pr-3">{item.campus_name || '-'}</td>
+                <td className="py-2">
+                  <button
+                    type="button"
+                    onClick={() => handleDownload(item)}
+                    className="rounded-lg border border-primary-200 px-3 py-1.5 text-xs font-medium text-primary-700 transition hover:border-primary-300 hover:bg-primary-50"
+                  >
+                    Descargar PDF
+                  </button>
+                </td>
               </tr>
             ))}
 
             {!loading && items.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-4 text-center text-sm text-primary-600">
+                <td colSpan={8} className="py-4 text-center text-sm text-primary-600">
                   No se encontraron certificados emitidos.
                 </td>
               </tr>

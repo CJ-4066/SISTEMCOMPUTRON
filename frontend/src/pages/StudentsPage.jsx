@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
+import { calculateAgeFromBirthDate, formatAgeLabel } from '../utils/age';
+import { getCampusScopeId } from '../utils/campusScope';
 import { buildDocumentValue, DOCUMENT_TYPE_OPTIONS, parseDocumentValue } from '../utils/document';
 
 const getTodayIsoDate = () => {
@@ -40,10 +43,30 @@ const emptyGuardian = {
   document_number: '',
 };
 
+const createTransferFormDefaults = () => ({
+  student_id: '',
+  source_enrollment_id: '',
+  target_campus_id: '',
+  allow_without_target_offering: false,
+  request_notes: '',
+});
+
+const formatTransferTimestamp = (value) => {
+  if (!value) return '-';
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString('es-PE');
+};
+
 const STUDENT_RECENT_LIMIT = 10;
+const TRANSFER_REQUEST_NAV_STORAGE_KEY = 'computron:last-transfer-request-token';
 
 export default function StudentsPage() {
-  const { hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [students, setStudents] = useState([]);
   const [studentSearch, setStudentSearch] = useState('');
@@ -51,14 +74,28 @@ export default function StudentsPage() {
 
   const [guardians, setGuardians] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [campuses, setCampuses] = useState([]);
   const [periods, setPeriods] = useState([]);
   const [guardianSearch, setGuardianSearch] = useState('');
   const [guardianLinkFilter, setGuardianLinkFilter] = useState('all');
+  const [transferRequests, setTransferRequests] = useState([]);
+  const [transferLoading, setTransferLoading] = useState(false);
+  const [transferCampusFilter, setTransferCampusFilter] = useState('');
+  const [transferStudentSearch, setTransferStudentSearch] = useState('');
+  const [transferStudentResults, setTransferStudentResults] = useState([]);
+  const [transferStudentLoading, setTransferStudentLoading] = useState(false);
+  const [transferContext, setTransferContext] = useState(null);
+  const [transferForm, setTransferForm] = useState(createTransferFormDefaults);
+  const [showTransferForm, setShowTransferForm] = useState(false);
+  const [loadingTransferOptions, setLoadingTransferOptions] = useState(false);
+  const [submittingTransfer, setSubmittingTransfer] = useState(false);
+  const [reviewingTransferId, setReviewingTransferId] = useState(null);
 
   const [studentForm, setStudentForm] = useState(getEmptyStudent);
   const [guardianForm, setGuardianForm] = useState(emptyGuardian);
   const [editingStudentId, setEditingStudentId] = useState(null);
 
+  const requestedTab = searchParams.get('tab');
   const [activeTab, setActiveTab] = useState('students');
   const [, startTabTransition] = useTransition();
   const [showStudentForm, setShowStudentForm] = useState(false);
@@ -66,19 +103,55 @@ export default function StudentsPage() {
 
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [transferMessage, setTransferMessage] = useState('');
+  const [transferError, setTransferError] = useState('');
 
-  const changeTab = (nextTab) => {
-    startTabTransition(() => setActiveTab(nextTab));
-  };
-
+  const userRoles = user?.roles || [];
+  const isRootAdminProfile = userRoles.includes('ADMIN') && !user?.base_campus_id;
   const canViewStudents = hasPermission(PERMISSIONS.STUDENTS_VIEW);
   const canManageStudents = hasPermission(PERMISSIONS.STUDENTS_MANAGE);
   const canViewGuardians = hasPermission(PERMISSIONS.GUARDIANS_VIEW);
   const canManageGuardians = hasPermission(PERMISSIONS.GUARDIANS_MANAGE);
+  const canViewCampuses = hasPermission(PERMISSIONS.CAMPUSES_VIEW);
+  const canManageCampuses = hasPermission(PERMISSIONS.CAMPUSES_MANAGE);
+  const canReadCampuses = canViewCampuses || canManageCampuses;
   const canViewCourses = hasPermission(PERMISSIONS.COURSES_VIEW);
   const canViewPeriods = hasPermission(PERMISSIONS.PERIODS_VIEW);
   const canManageEnrollments = hasPermission(PERMISSIONS.ENROLLMENTS_MANAGE);
   const canUseInlineEnrollment = canManageStudents && canManageEnrollments && canViewCourses && canViewPeriods;
+  const canViewTransfers = canViewStudents;
+  const canManageTransfers = canViewStudents && canManageEnrollments;
+  const canSelectTransferCampus = Boolean(isRootAdminProfile && canReadCampuses);
+  const showStudentActions = canManageStudents || canManageTransfers;
+  const resolveTabKey = useCallback(
+    (candidateTab) => {
+      const normalized = String(candidateTab || '').trim().toLowerCase();
+
+      if (normalized === 'transfers' && canViewTransfers) return 'transfers';
+      if (normalized === 'guardians' && canViewGuardians) return 'guardians';
+      if (normalized === 'students' && canViewStudents) return 'students';
+      if (canViewStudents) return 'students';
+      if (canViewGuardians) return 'guardians';
+      return 'students';
+    },
+    [canViewGuardians, canViewStudents, canViewTransfers],
+  );
+  const changeTab = useCallback(
+    (nextTab, { replace = false } = {}) => {
+      const resolvedTab = resolveTabKey(nextTab);
+      startTabTransition(() => setActiveTab(resolvedTab));
+
+      const nextParams = new URLSearchParams(searchParams);
+      if (resolvedTab && resolvedTab !== 'students') {
+        nextParams.set('tab', resolvedTab);
+      } else {
+        nextParams.delete('tab');
+      }
+
+      setSearchParams(nextParams, { replace });
+    },
+    [resolveTabKey, searchParams, setSearchParams, startTabTransition],
+  );
 
   const fetchStudents = useCallback(
     async (search = '') => {
@@ -161,6 +234,69 @@ export default function StudentsPage() {
     }
   }, [canViewCourses, canViewPeriods]);
 
+  const loadCampuses = useCallback(async () => {
+    if (!canReadCampuses) {
+      setCampuses([]);
+      return;
+    }
+
+    try {
+      const response = await api.get('/campuses', {
+        ...(canSelectTransferCampus ? { _skipCampusScope: true } : {}),
+      });
+      setCampuses(response.data?.items || []);
+    } catch (requestError) {
+      setTransferError(requestError.response?.data?.message || 'No se pudieron cargar las sedes.');
+    }
+  }, [canReadCampuses, canSelectTransferCampus]);
+
+  const loadTransfers = useCallback(async () => {
+    if (!canViewTransfers) {
+      setTransferRequests([]);
+      return;
+    }
+
+    setTransferLoading(true);
+    try {
+      const response = await api.get('/students/transfers');
+      setTransferRequests(response.data.items || []);
+    } catch (requestError) {
+      setTransferError(requestError.response?.data?.message || 'No se pudieron cargar las solicitudes de traslado.');
+    } finally {
+      setTransferLoading(false);
+    }
+  }, [canViewTransfers]);
+
+  const loadTransferStudentResults = useCallback(
+    async (search = '') => {
+      if (!canManageTransfers) {
+        setTransferStudentResults([]);
+        return;
+      }
+
+      setTransferStudentLoading(true);
+      try {
+        const response = await api.get('/students', {
+          params: {
+            q: search || undefined,
+            campus_id: canSelectTransferCampus && transferCampusFilter ? Number(transferCampusFilter) : undefined,
+            page: 1,
+            page_size: 8,
+          },
+          ...(canSelectTransferCampus ? { _skipCampusScope: true } : {}),
+        });
+        setTransferStudentResults(
+          (response.data?.items || []).filter((student) => student.assigned_enrollment_status === 'ACTIVE'),
+        );
+      } catch (requestError) {
+        setTransferError(requestError.response?.data?.message || 'No se pudieron cargar alumnos para traslado.');
+      } finally {
+        setTransferStudentLoading(false);
+      }
+    },
+    [canManageTransfers, canSelectTransferCampus, transferCampusFilter],
+  );
+
   useEffect(() => {
     const debounce = setTimeout(() => {
       fetchStudents(studentSearch);
@@ -178,14 +314,60 @@ export default function StudentsPage() {
   }, [loadEnrollmentCatalogs]);
 
   useEffect(() => {
-    if (activeTab === 'students' && !canViewStudents && canViewGuardians) {
-      setActiveTab('guardians');
+    if (activeTab !== 'transfers' || !canSelectTransferCampus) return;
+    if (campuses.length > 0) return;
+    loadCampuses();
+  }, [activeTab, campuses.length, canSelectTransferCampus, loadCampuses]);
+
+  useEffect(() => {
+    loadTransfers();
+  }, [loadTransfers]);
+
+  useEffect(() => {
+    if (activeTab !== 'transfers' || !canManageTransfers) return undefined;
+
+    const debounce = setTimeout(() => {
+      loadTransferStudentResults(transferStudentSearch.trim());
+    }, 250);
+
+    return () => clearTimeout(debounce);
+  }, [activeTab, canManageTransfers, loadTransferStudentResults, transferStudentSearch]);
+
+  useEffect(() => {
+    if (activeTab === 'transfers') return;
+    if (!transferError && !transferMessage) return;
+
+    setTransferError('');
+    setTransferMessage('');
+  }, [activeTab, transferError, transferMessage]);
+
+  useEffect(() => {
+    if (!canSelectTransferCampus) return;
+    setTransferContext(null);
+    setTransferForm(createTransferFormDefaults());
+    setShowTransferForm(false);
+  }, [canSelectTransferCampus, transferCampusFilter]);
+
+  useEffect(() => {
+    const resolvedTab = resolveTabKey(requestedTab);
+    const canonicalTab = resolvedTab && resolvedTab !== 'students' ? resolvedTab : '';
+    const currentRequestedTab = String(requestedTab || '').trim().toLowerCase();
+
+    if (resolvedTab !== activeTab) {
+      startTabTransition(() => setActiveTab(resolvedTab));
+      return;
     }
 
-    if (activeTab === 'guardians' && !canViewGuardians && canViewStudents) {
-      setActiveTab('students');
+    if (currentRequestedTab !== canonicalTab) {
+      const nextParams = new URLSearchParams(searchParams);
+      if (canonicalTab) {
+        nextParams.set('tab', canonicalTab);
+      } else {
+        nextParams.delete('tab');
+      }
+      setSearchParams(nextParams, { replace: true });
     }
-  }, [activeTab, canViewGuardians, canViewStudents]);
+  }, [activeTab, requestedTab, resolveTabKey, searchParams, setSearchParams, startTabTransition]);
 
   useEffect(() => {
     if (!canUseInlineEnrollment && studentForm.link_enrollment) {
@@ -198,6 +380,63 @@ export default function StudentsPage() {
       }));
     }
   }, [canUseInlineEnrollment, studentForm.link_enrollment]);
+
+  const selectedTransferOption = useMemo(() => {
+    if (!transferContext?.options?.length) return null;
+
+    return (
+      transferContext.options.find(
+        (option) => String(option.enrollment_id) === String(transferForm.source_enrollment_id),
+      ) || transferContext.options[0]
+    );
+  }, [transferContext, transferForm.source_enrollment_id]);
+
+  const selectedTransferTargetCampuses = useMemo(() => {
+    if (!selectedTransferOption) return [];
+
+    return transferForm.allow_without_target_offering
+      ? selectedTransferOption.all_target_campuses || []
+      : selectedTransferOption.target_campuses || [];
+  }, [selectedTransferOption, transferForm.allow_without_target_offering]);
+
+  const selectedTransferAvailableCampusIds = useMemo(
+    () => new Set((selectedTransferOption?.target_campuses || []).map((campus) => String(campus.campus_id))),
+    [selectedTransferOption],
+  );
+
+  useEffect(() => {
+    if (!transferContext?.options?.length) return;
+
+    const fallbackOption = selectedTransferOption || transferContext.options[0];
+    if (!fallbackOption) return;
+
+    const targetExists = selectedTransferTargetCampuses.some(
+      (campus) => String(campus.campus_id) === String(transferForm.target_campus_id),
+    );
+    const nextTargetCampusId = targetExists
+      ? String(transferForm.target_campus_id || '')
+      : String(selectedTransferTargetCampuses[0]?.campus_id || '');
+
+    if (
+      String(transferForm.source_enrollment_id || '') === String(fallbackOption.enrollment_id) &&
+      String(transferForm.target_campus_id || '') === nextTargetCampusId
+    ) {
+      return;
+    }
+
+    setTransferForm((prev) => ({
+      ...prev,
+      source_enrollment_id: String(fallbackOption.enrollment_id),
+      target_campus_id: nextTargetCampusId,
+    }));
+  }, [
+    selectedTransferOption,
+    selectedTransferTargetCampuses,
+    transferContext,
+    transferForm.source_enrollment_id,
+    transferForm.target_campus_id,
+    transferForm.allow_without_target_offering,
+  ]);
 
   const filteredGuardians = useMemo(() => {
     const term = guardianSearch.trim().toLowerCase();
@@ -235,6 +474,17 @@ export default function StudentsPage() {
 
     return options;
   }, [courses]);
+
+  const pendingIncomingTransfers = useMemo(
+    () =>
+      transferRequests.filter((item) => item.direction === 'INCOMING' && item.status === 'PENDING').length,
+    [transferRequests],
+  );
+
+  const studentAgeLabel = useMemo(
+    () => formatAgeLabel(calculateAgeFromBirthDate(studentForm.birth_date)),
+    [studentForm.birth_date],
+  );
 
   const submitStudent = async (event) => {
     event.preventDefault();
@@ -398,6 +648,197 @@ export default function StudentsPage() {
     }
   };
 
+  const closeTransferForm = () => {
+    setTransferContext(null);
+    setTransferForm(createTransferFormDefaults());
+    setShowTransferForm(false);
+    setLoadingTransferOptions(false);
+  };
+
+  const openTransferRequest = useCallback(async (student) => {
+    if (!canManageTransfers) return;
+
+    setTransferError('');
+    setTransferMessage('');
+    setLoadingTransferOptions(true);
+    setTransferContext(null);
+    setShowTransferForm(false);
+
+    try {
+      const response = await api.get(`/students/${student.id}/transfer-options`, {
+        params: {
+          campus_id: canSelectTransferCampus && transferCampusFilter ? Number(transferCampusFilter) : undefined,
+        },
+        ...(canSelectTransferCampus ? { _skipCampusScope: true } : {}),
+      });
+      const detail = response.data?.item || {};
+      const options = detail.options || [];
+      if (!options.length) {
+        changeTab('transfers');
+        setTransferError('El alumno no tiene una matrícula activa disponible para traslado en la sede filtrada.');
+        return;
+      }
+      const preferredOption = options.find((option) => (option.target_campuses || []).length > 0) || options[0];
+      const hasAnyTargets = options.some((option) => (option.target_campuses || []).length > 0);
+
+      setTransferStudentSearch(`${detail.student?.first_name || student.first_name || ''} ${detail.student?.last_name || student.last_name || ''}`.trim());
+      setTransferContext({
+        student: detail.student,
+        options,
+      });
+      setTransferForm({
+        student_id: String(detail.student?.id || student.id),
+        source_enrollment_id: String(preferredOption.enrollment_id),
+        target_campus_id: String(preferredOption.target_campuses?.[0]?.campus_id || ''),
+        allow_without_target_offering: false,
+        request_notes: '',
+      });
+      setShowTransferForm(true);
+      changeTab('transfers');
+      if (!hasAnyTargets) {
+        setTransferError(
+          'La matrícula cargó correctamente, pero no existe otra sede activa disponible para ese curso y periodo. Si necesitas moverlo igual, marca la opción "No es necesario que haya un curso".',
+        );
+      }
+    } catch (requestError) {
+      setTransferError(requestError.response?.data?.message || 'No se pudo preparar la solicitud de traslado.');
+    } finally {
+      setLoadingTransferOptions(false);
+    }
+  }, [canManageTransfers, canSelectTransferCampus, changeTab, transferCampusFilter]);
+
+  const selectTransferStudent = useCallback(
+    async (student) => {
+      await openTransferRequest(student);
+    },
+    [openTransferRequest],
+  );
+
+  useEffect(() => {
+    const transferStudent = location.state?.transferStudent || null;
+    const transferRequestToken = String(location.state?.transferRequestToken || '').trim();
+    if (!transferStudent?.id || !transferRequestToken || !canManageTransfers) return;
+
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const lastHandledToken = window.sessionStorage.getItem(TRANSFER_REQUEST_NAV_STORAGE_KEY) || '';
+      if (lastHandledToken === transferRequestToken) {
+        navigate(location.pathname, { replace: true, state: null });
+        return;
+      }
+      window.sessionStorage.setItem(TRANSFER_REQUEST_NAV_STORAGE_KEY, transferRequestToken);
+    }
+
+    navigate(location.pathname, { replace: true, state: null });
+    openTransferRequest({
+      id: transferStudent.id,
+      first_name: transferStudent.first_name || '',
+      last_name: transferStudent.last_name || '',
+    });
+  }, [canManageTransfers, location.pathname, location.state, navigate, openTransferRequest]);
+
+  const submitTransferRequest = async (event) => {
+    event.preventDefault();
+    if (!canManageTransfers) return;
+
+    if (!selectedTransferTargetCampuses.length) {
+      setTransferError('La matrícula seleccionada no tiene sedes destino disponibles para registrar el traslado.');
+      return;
+    }
+
+    const campusScopeId =
+      (canSelectTransferCampus && transferCampusFilter ? Number(transferCampusFilter) : null) ||
+      Number(selectedTransferOption?.source_campus_id || 0) ||
+      getCampusScopeId();
+    if (!campusScopeId) {
+      setTransferError('Selecciona una sede activa para registrar el traslado.');
+      return;
+    }
+
+    if (!transferForm.student_id || !transferForm.source_enrollment_id || !transferForm.target_campus_id) {
+      setTransferError('Selecciona la matrícula y la sede destino para registrar el traslado.');
+      return;
+    }
+
+    setTransferError('');
+    setTransferMessage('');
+    setSubmittingTransfer(true);
+
+    try {
+      await api.post(
+        '/students/transfers',
+        {
+          student_id: Number(transferForm.student_id),
+          source_enrollment_id: Number(transferForm.source_enrollment_id),
+          target_campus_id: Number(transferForm.target_campus_id),
+          allow_without_target_offering: Boolean(transferForm.allow_without_target_offering),
+          request_notes: transferForm.request_notes.trim() || null,
+        },
+        {
+          params: { campus_id: campusScopeId },
+        },
+      );
+
+      closeTransferForm();
+      setTransferMessage('Solicitud de traslado registrada.');
+      await loadTransfers();
+    } catch (requestError) {
+      setTransferError(requestError.response?.data?.message || 'No se pudo registrar la solicitud de traslado.');
+    } finally {
+      setSubmittingTransfer(false);
+    }
+  };
+
+  const resolveTransferRequest = async (transfer, decision) => {
+    if (!canManageTransfers || !transfer?.id) return;
+
+    const campusScopeId = getCampusScopeId();
+    if (!campusScopeId) {
+      setTransferError('Selecciona la sede destino activa para revisar el traslado.');
+      return;
+    }
+
+    const promptMessage =
+      decision === 'APPROVE'
+        ? 'Observacion de aprobacion (opcional)'
+        : 'Motivo del rechazo';
+    const rawNotes = window.prompt(promptMessage, transfer.review_notes || '');
+    if (rawNotes === null) return;
+
+    const reviewNotes = rawNotes.trim();
+    if (decision === 'REJECT' && !reviewNotes) {
+      setTransferError('Debes indicar un motivo para rechazar el traslado.');
+      return;
+    }
+
+    setTransferError('');
+    setTransferMessage('');
+    setReviewingTransferId(transfer.id);
+
+    try {
+      await api.patch(
+        `/students/transfers/${transfer.id}/decision`,
+        {
+          decision,
+          review_notes: reviewNotes || null,
+        },
+        {
+          params: { campus_id: campusScopeId },
+        },
+      );
+
+      setTransferMessage(
+        decision === 'APPROVE'
+          ? 'Traslado aprobado y matrícula creada en la sede destino.'
+          : 'Solicitud de traslado rechazada.',
+      );
+      await loadTransfers();
+    } catch (requestError) {
+      setTransferError(requestError.response?.data?.message || 'No se pudo actualizar la solicitud de traslado.');
+    } finally {
+      setReviewingTransferId(null);
+    }
+  };
+
   const submitGuardian = async (event) => {
     event.preventDefault();
     if (!canManageGuardians) return;
@@ -445,6 +886,11 @@ export default function StudentsPage() {
           <span className="rounded-full bg-accent-100 px-3 py-1 text-xs font-semibold text-accent-800">
             {guardians.length} apoderados
           </span>
+          {canViewTransfers ? (
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-primary-800">
+              {transferRequests.length} traslados
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -467,10 +913,35 @@ export default function StudentsPage() {
             Apoderados
           </button>
         ) : null}
+        {canViewTransfers ? (
+          <button
+            type="button"
+            onClick={() => changeTab('transfers')}
+            className={`page-tab ${activeTab === 'transfers' ? 'page-tab-active' : ''}`}
+          >
+            Traslados{pendingIncomingTransfers > 0 ? ` (${pendingIncomingTransfers})` : ''}
+          </button>
+        ) : null}
       </div>
 
-      {message ? <p className="rounded-xl bg-primary-50 p-3 text-sm text-primary-800">{message}</p> : null}
-      {error ? <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+      {activeTab !== 'transfers' && message ? (
+        <p className="rounded-xl bg-primary-50 p-3 text-sm text-primary-800">{message}</p>
+      ) : null}
+      {activeTab !== 'transfers' && error ? (
+        <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>
+      ) : null}
+      {activeTab === 'transfers' && transferMessage ? (
+        <p className="rounded-xl bg-primary-50 p-3 text-sm text-primary-800">{transferMessage}</p>
+      ) : null}
+      {activeTab === 'transfers' && transferError ? (
+        <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{transferError}</p>
+      ) : null}
+      {activeTab === 'transfers' && canViewTransfers && pendingIncomingTransfers > 0 ? (
+        <p className="rounded-xl bg-accent-50 p-3 text-sm text-accent-800">
+          Tienes {pendingIncomingTransfers} solicitud{pendingIncomingTransfers === 1 ? '' : 'es'} de traslado por revisar
+          en la sede activa.
+        </p>
+      ) : null}
 
       {activeTab === 'students' && canViewStudents ? (
         <div className="space-y-4">
@@ -545,13 +1016,25 @@ export default function StudentsPage() {
                   onChange={(event) => setStudentForm((prev) => ({ ...prev, document_number: event.target.value }))}
                   required
                 />
-                <input
-                  type="date"
-                  className="app-input"
-                  value={studentForm.birth_date}
-                  onChange={(event) => setStudentForm((prev) => ({ ...prev, birth_date: event.target.value }))}
-                  required
-                />
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Fecha de nacimiento</span>
+                  <input
+                    type="date"
+                    className="app-input"
+                    value={studentForm.birth_date}
+                    onChange={(event) => setStudentForm((prev) => ({ ...prev, birth_date: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Edad</span>
+                  <input
+                    className="app-input"
+                    value={studentAgeLabel}
+                    placeholder="Se calcula automáticamente"
+                    readOnly
+                  />
+                </label>
                 <input
                   type="email"
                   className="app-input"
@@ -682,46 +1165,56 @@ export default function StudentsPage() {
 
                   {studentForm.link_enrollment ? (
                     canUseInlineEnrollment ? (
-                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        <select
-                          className="app-input lg:col-span-2"
-                          value={studentForm.course_campus_id}
-                          onChange={(event) =>
-                            setStudentForm((prev) => ({ ...prev, course_campus_id: event.target.value }))
-                          }
-                          required
-                        >
-                          <option value="">Seleccione curso/carrera y sede</option>
-                          {offeringOptions.map((offering) => (
-                            <option key={offering.id} value={offering.id}>
-                              {offering.label}
-                            </option>
-                          ))}
-                        </select>
+                      <>
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                          <select
+                            className="app-input lg:col-span-2"
+                            value={studentForm.course_campus_id}
+                            onChange={(event) =>
+                              setStudentForm((prev) => ({ ...prev, course_campus_id: event.target.value }))
+                            }
+                            required
+                          >
+                            <option value="">Seleccione curso/carrera y sede</option>
+                            {offeringOptions.map((offering) => (
+                              <option key={offering.id} value={offering.id}>
+                                {offering.label}
+                              </option>
+                            ))}
+                          </select>
 
-                        <select
-                          className="app-input"
-                          value={studentForm.period_id}
-                          onChange={(event) => setStudentForm((prev) => ({ ...prev, period_id: event.target.value }))}
-                          required
-                        >
-                          <option value="">Seleccione periodo</option>
-                          {periods.map((period) => (
-                            <option key={period.id} value={period.id}>
-                              {period.name}
-                            </option>
-                          ))}
-                        </select>
+                          <select
+                            className="app-input"
+                            value={studentForm.period_id}
+                            onChange={(event) =>
+                              setStudentForm((prev) => ({ ...prev, period_id: event.target.value }))
+                            }
+                            required
+                          >
+                            <option value="">Seleccione periodo</option>
+                            {periods.map((period) => (
+                              <option key={period.id} value={period.id}>
+                                {period.name}
+                              </option>
+                            ))}
+                          </select>
 
-                        <input
-                          type="date"
-                          className="app-input"
-                          value={studentForm.enrollment_date}
-                          onChange={(event) =>
-                            setStudentForm((prev) => ({ ...prev, enrollment_date: event.target.value }))
-                          }
-                        />
-                      </div>
+                          <label className="space-y-1">
+                            <span className="text-xs font-semibold text-primary-700">Fecha de matrícula</span>
+                            <input
+                              type="date"
+                              className="app-input"
+                              value={studentForm.enrollment_date}
+                              onChange={(event) =>
+                                setStudentForm((prev) => ({ ...prev, enrollment_date: event.target.value }))
+                              }
+                            />
+                          </label>
+                        </div>
+                        <p className="text-xs text-primary-600">
+                          La fecha de matrícula es el día en que se registra la inscripción del alumno.
+                        </p>
+                      </>
                     ) : (
                       <p className="text-sm text-primary-700">
                         Tu usuario no tiene permisos suficientes para crear matriculas desde este formulario.
@@ -763,9 +1256,10 @@ export default function StudentsPage() {
                   <th className="pb-2 pr-3">Tipo doc.</th>
                   <th className="pb-2 pr-3">Nro. doc.</th>
                   <th className="pb-2 pr-3">Contacto</th>
+                  <th className="pb-2 pr-3">Sede asignada</th>
                   <th className="pb-2 pr-3">Registrado por</th>
                   <th className="pb-2">Apoderados</th>
-                  {canManageStudents ? <th className="pb-2">Acciones</th> : null}
+                  {showStudentActions ? <th className="pb-2">Acciones</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -779,29 +1273,51 @@ export default function StudentsPage() {
                     <td className="py-2 pr-3">{parsedDocument.document_type}</td>
                     <td className="py-2 pr-3">{parsedDocument.document_number || '-'}</td>
                     <td className="py-2 pr-3">{student.email || student.phone || '-'}</td>
+                    <td className="py-2 pr-3">
+                      <div>{student.assigned_campus_name || '-'}</div>
+                      {student.assigned_enrollment_status &&
+                      student.assigned_enrollment_status !== 'ACTIVE' ? (
+                        <div className="text-xs text-primary-500">
+                          Matricula {String(student.assigned_enrollment_status).toLowerCase()}
+                        </div>
+                      ) : null}
+                    </td>
                     <td className="py-2 pr-3">{student.created_by_name || '-'}</td>
                     <td className="py-2">
                       {student.guardians?.length
                         ? student.guardians.map((guardian) => guardian.name).join(', ')
                         : 'Sin apoderado'}
                     </td>
-                    {canManageStudents ? (
+                    {showStudentActions ? (
                       <td className="py-2">
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => startStudentEdit(student)}
-                            className="rounded-lg border border-primary-300 bg-white px-2 py-1 text-xs font-semibold text-primary-800 hover:bg-primary-50"
-                          >
-                            EDITAR
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteStudent(student)}
-                            className="rounded-lg border border-red-300 bg-white px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
-                          >
-                            ELIMINAR
-                          </button>
+                          {canManageStudents ? (
+                            <button
+                              type="button"
+                              onClick={() => startStudentEdit(student)}
+                              className="rounded-lg border border-primary-300 bg-white px-2 py-1 text-xs font-semibold text-primary-800 hover:bg-primary-50"
+                            >
+                              EDITAR
+                            </button>
+                          ) : null}
+                          {canManageStudents ? (
+                            <button
+                              type="button"
+                              onClick={() => deleteStudent(student)}
+                              className="rounded-lg border border-red-300 bg-white px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
+                            >
+                              ELIMINAR
+                            </button>
+                          ) : null}
+                          {canManageTransfers ? (
+                            <button
+                              type="button"
+                              onClick={() => openTransferRequest(student)}
+                              className="rounded-lg border border-accent-300 bg-white px-2 py-1 text-xs font-semibold text-accent-800 hover:bg-accent-50"
+                            >
+                              TRASLADO
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     ) : null}
@@ -810,8 +1326,418 @@ export default function StudentsPage() {
                 })}
                 {!studentLoading && students.length === 0 ? (
                   <tr>
-                    <td colSpan={canManageStudents ? 7 : 6} className="py-4 text-center text-sm text-primary-600">
+                    <td colSpan={showStudentActions ? 8 : 7} className="py-4 text-center text-sm text-primary-600">
                       No se encontraron alumnos con ese criterio.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </article>
+        </div>
+      ) : null}
+
+      {activeTab === 'transfers' && canViewTransfers ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-primary-900">Solicitudes de traslado entre sedes</h2>
+              <p className="text-sm text-primary-700">
+                La sede origen registra la solicitud y la sede destino la aprueba o la rechaza.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-800">
+                {transferRequests.length} solicitudes
+              </span>
+              <span className="rounded-full bg-accent-100 px-3 py-1 text-xs font-semibold text-accent-800">
+                {pendingIncomingTransfers} pendientes por revisar
+              </span>
+              {loadingTransferOptions ? (
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-primary-700">
+                  Preparando traslado...
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          {canManageTransfers ? (
+            <div className="panel-soft space-y-3">
+              <div>
+                <h3 className="text-base font-semibold text-primary-900">Seleccionar alumno</h3>
+                <p className="text-sm text-primary-700">
+                  Busca por nombre o documento. Al elegir un alumno, el sistema carga su matricula activa y filtra la
+                  sede donde esta asignado. Aqui solo se listan alumnos con matricula activa.
+                </p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                {canSelectTransferCampus ? (
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-primary-700">Filtrar alumnos por sede</span>
+                    <select
+                      className="app-input"
+                      value={transferCampusFilter}
+                      onChange={(event) => setTransferCampusFilter(event.target.value)}
+                    >
+                      <option value="">Todas las sedes</option>
+                      {campuses.map((campus) => (
+                        <option key={campus.id} value={campus.id}>
+                          {campus.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Alumno</span>
+                  <input
+                    className="app-input"
+                    placeholder="Buscar alumno por nombre o numero de documento"
+                    value={transferStudentSearch}
+                    onChange={(event) => setTransferStudentSearch(event.target.value)}
+                  />
+                </label>
+              </div>
+
+              {transferStudentLoading ? (
+                <p className="text-sm text-primary-700">Buscando alumnos...</p>
+              ) : null}
+
+              {!transferStudentLoading && transferStudentResults.length > 0 ? (
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {transferStudentResults.map((student) => {
+                    const parsedDocument = parseDocumentValue(student.document_number);
+                    return (
+                      <button
+                        key={student.id}
+                        type="button"
+                        onClick={() => selectTransferStudent(student)}
+                        className="rounded-xl border border-primary-200 bg-white px-3 py-3 text-left hover:border-accent-300 hover:bg-accent-50"
+                      >
+                        <p className="font-semibold text-primary-900">
+                          {student.first_name} {student.last_name}
+                        </p>
+                        <p className="text-xs text-primary-600">
+                          {parsedDocument.document_type}: {parsedDocument.document_number || '-'}
+                        </p>
+                        <p className="mt-2 text-xs text-primary-700">
+                          Sede asignada: {student.assigned_campus_name || 'Sin sede'}
+                        </p>
+                        <p className="text-xs text-primary-600">
+                          {student.assigned_course_name || 'Sin curso'} |{' '}
+                          {student.assigned_enrollment_status === 'ACTIVE'
+                            ? 'Matricula activa'
+                            : student.assigned_enrollment_status
+                              ? `Matricula ${String(student.assigned_enrollment_status).toLowerCase()}`
+                              : 'Sin matricula'}
+                        </p>
+                        <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-accent-700">
+                          {student.assigned_enrollment_status === 'ACTIVE' ? 'Preparar traslado' : 'Revisar alumno'}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              {!transferStudentLoading && transferStudentResults.length === 0 ? (
+                <p className="text-sm text-primary-700">
+                  {transferStudentSearch.trim()
+                    ? 'No se encontraron alumnos para ese criterio.'
+                    : 'Escribe un nombre o documento para seleccionar al alumno que vas a trasladar.'}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {showTransferForm && transferContext ? (
+            <form onSubmit={submitTransferRequest} className="panel-soft space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-primary-900">
+                    Solicitar traslado: {transferContext.student?.first_name} {transferContext.student?.last_name}
+                  </h3>
+                  <p className="text-sm text-primary-700">
+                    Selecciona la matrícula de origen y la sede que deberá aceptar el traslado.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeTransferForm}
+                  className="rounded-lg border border-primary-300 bg-white px-3 py-2 text-sm font-semibold text-primary-800 hover:bg-primary-50"
+                >
+                  Cerrar
+                </button>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-3">
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Matricula / curso actual</span>
+                  <select
+                    className="app-input"
+                    value={transferForm.source_enrollment_id}
+                    onChange={(event) =>
+                      setTransferForm((prev) => ({ ...prev, source_enrollment_id: event.target.value }))
+                    }
+                    required
+                  >
+                    {transferContext.options.map((option) => (
+                      <option key={option.enrollment_id} value={option.enrollment_id}>
+                        {option.course_name} - {option.period_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Sede asignada</span>
+                  <input
+                    className="app-input"
+                    value={selectedTransferOption?.source_campus_name || ''}
+                    placeholder="Se completa al seleccionar el alumno"
+                    readOnly
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-primary-700">Sede destino</span>
+                  <select
+                    className="app-input"
+                    value={transferForm.target_campus_id}
+                    onChange={(event) =>
+                      setTransferForm((prev) => ({ ...prev, target_campus_id: event.target.value }))
+                    }
+                    required={Boolean(selectedTransferTargetCampuses.length)}
+                    disabled={!selectedTransferOption || !selectedTransferTargetCampuses.length}
+                  >
+                    <option value="">
+                      {selectedTransferTargetCampuses.length
+                        ? 'Seleccione sede destino'
+                        : 'No hay sedes destino disponibles'}
+                    </option>
+                    {selectedTransferTargetCampuses.map((campus) => (
+                      <option key={campus.campus_id} value={campus.campus_id}>
+                        {campus.campus_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="flex items-start gap-3 rounded-xl border border-primary-200 bg-white px-3 py-3 text-sm text-primary-800">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4"
+                  checked={transferForm.allow_without_target_offering}
+                  onChange={(event) =>
+                    setTransferForm((prev) => ({
+                      ...prev,
+                      allow_without_target_offering: event.target.checked,
+                    }))
+                  }
+                />
+                <span>
+                  <span className="block font-semibold text-primary-900">No es necesario que haya un curso</span>
+                  <span className="block text-xs text-primary-700">
+                    Si lo marcas, el traslado podrá enviarse aunque la sede destino no tenga una oferta activa del mismo
+                    curso. En ese caso el alumno cambia de sede, pero no se crea matrícula nueva hasta registrar un curso
+                    después.
+                  </span>
+                </span>
+              </label>
+
+              {selectedTransferOption ? (
+                <div className="space-y-2 rounded-xl border border-primary-200 bg-white px-3 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-primary-900">
+                      Validación de sedes para el curso de origen
+                    </p>
+                    <p className="text-xs text-primary-700">
+                      Aquí solo se muestran las sedes donde el mismo curso del alumno sí está habilitado.
+                    </p>
+                  </div>
+
+                  {selectedTransferOption.course_enabled_campuses?.length ? (
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {selectedTransferOption.course_enabled_campuses.map((campus) => {
+                        const campusId = String(campus.campus_id);
+                        const isAvailableForTransfer = selectedTransferAvailableCampusIds.has(campusId);
+                        const statusText = isAvailableForTransfer
+                          ? 'Curso habilitado y disponible para traslado'
+                          : 'Curso habilitado, pero esta sede no está disponible para esta solicitud';
+
+                        return (
+                          <label
+                            key={campus.campus_id}
+                            className="flex items-start gap-3 rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-sm text-primary-900"
+                          >
+                            <input type="checkbox" className="mt-1 h-4 w-4" checked readOnly />
+                            <span>
+                              <span className="block font-medium">{campus.campus_name}</span>
+                              <span className="block text-xs text-primary-700">{statusText}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-red-700">
+                      No hay sedes con este curso habilitado fuera de la sede de origen.
+                    </p>
+                  )}
+                </div>
+              ) : null}
+
+              {selectedTransferOption ? (
+                <div className="space-y-1">
+                  <p className="text-sm text-primary-700">
+                    Origen actual: {selectedTransferOption.source_campus_name} | Curso: {selectedTransferOption.course_name}
+                    {' '}| Periodo: {selectedTransferOption.period_name}
+                  </p>
+                  {!(selectedTransferOption.target_campuses || []).length && !transferForm.allow_without_target_offering ? (
+                    <p className="text-sm text-red-700">
+                      No aparece un cambio de sede para esta matrícula porque no existe otra sede activa habilitada para
+                      ese mismo curso y periodo. Marca la opción para permitir traslado sin curso.
+                    </p>
+                  ) : null}
+                  {transferForm.allow_without_target_offering ? (
+                    <p className="text-sm text-primary-700">
+                      El traslado se registrará sin exigir curso equivalente en la sede destino.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <textarea
+                className="app-input min-h-[110px]"
+                placeholder="Motivo u observaciones del traslado (opcional)"
+                value={transferForm.request_notes}
+                onChange={(event) => setTransferForm((prev) => ({ ...prev, request_notes: event.target.value }))}
+              />
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  disabled={submittingTransfer || !selectedTransferTargetCampuses.length}
+                  className="rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {submittingTransfer ? 'Registrando...' : 'Registrar solicitud'}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeTransferForm}
+                  className="rounded-xl border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-800 hover:bg-primary-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          ) : (
+            <p className="rounded-xl border border-dashed border-primary-300 bg-white p-3 text-sm text-primary-700">
+              Usa el botón <span className="font-semibold">TRASLADO</span> en el listado de alumnos para crear una
+              solicitud desde la sede activa.
+            </p>
+          )}
+
+          <article className="card overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-primary-600">
+                  <th className="pb-2 pr-3">Solicitud</th>
+                  <th className="pb-2 pr-3">Alumno</th>
+                  <th className="pb-2 pr-3">Curso / periodo</th>
+                  <th className="pb-2 pr-3">Origen</th>
+                  <th className="pb-2 pr-3">Destino</th>
+                  <th className="pb-2 pr-3">Estado</th>
+                  <th className="pb-2 pr-3">Notas</th>
+                  <th className="pb-2">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transferRequests.map((item) => {
+                  const statusClassName =
+                    item.status === 'APPROVED'
+                      ? 'bg-primary-100 text-primary-800'
+                      : item.status === 'REJECTED'
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-accent-100 text-accent-800';
+                  const directionLabel =
+                    item.direction === 'INCOMING'
+                      ? 'Recibir'
+                      : item.direction === 'OUTGOING'
+                        ? 'Enviada'
+                        : 'General';
+
+                  return (
+                    <tr key={item.id} className="border-t border-primary-100 align-top">
+                      <td className="py-2 pr-3">
+                        <p className="font-medium text-primary-900">#{item.id}</p>
+                        <p className="text-xs text-primary-600">{formatTransferTimestamp(item.created_at)}</p>
+                        <p className="text-xs text-primary-600">{item.requested_by_name || 'Sin usuario origen'}</p>
+                        <span className="mt-1 inline-flex rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-primary-700">
+                          {directionLabel}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <p className="font-medium text-primary-900">{item.student_name}</p>
+                        <p className="text-xs text-primary-600">{item.student_document || '-'}</p>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <p className="font-medium text-primary-900">{item.course_name}</p>
+                        <p className="text-xs text-primary-600">{item.period_name}</p>
+                      </td>
+                      <td className="py-2 pr-3">{item.source_campus_name}</td>
+                      <td className="py-2 pr-3">{item.target_campus_name}</td>
+                      <td className="py-2 pr-3">
+                        <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${statusClassName}`}>
+                          {item.status}
+                        </span>
+                        {item.reviewed_by_name ? (
+                          <p className="mt-1 text-xs text-primary-600">
+                            {item.reviewed_by_name} | {formatTransferTimestamp(item.decided_at)}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="py-2 pr-3">
+                        <p>{item.request_notes || 'Sin observaciones del origen.'}</p>
+                        {item.review_notes ? (
+                          <p className="mt-1 text-xs text-primary-600">Revision: {item.review_notes}</p>
+                        ) : null}
+                      </td>
+                      <td className="py-2">
+                        {item.can_review && canManageTransfers ? (
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={reviewingTransferId === item.id}
+                              onClick={() => resolveTransferRequest(item, 'APPROVE')}
+                              className="rounded-lg border border-primary-300 bg-white px-2 py-1 text-xs font-semibold text-primary-800 hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              APROBAR
+                            </button>
+                            <button
+                              type="button"
+                              disabled={reviewingTransferId === item.id}
+                              onClick={() => resolveTransferRequest(item, 'REJECT')}
+                              className="rounded-lg border border-red-300 bg-white px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              RECHAZAR
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-primary-500">Sin acciones</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {!transferLoading && transferRequests.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-4 text-center text-sm text-primary-600">
+                      No hay solicitudes de traslado para la sede activa.
                     </td>
                   </tr>
                 ) : null}

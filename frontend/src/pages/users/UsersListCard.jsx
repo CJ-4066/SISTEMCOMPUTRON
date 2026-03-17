@@ -17,6 +17,8 @@ export default function UsersListCard({
   loadingUsers,
   exportingUsers,
   onExportUsers,
+  canCreateUsers,
+  onOpenCreateUser,
   statusUpdatingUserId,
   canManageStatus,
   onToggleStatus,
@@ -69,6 +71,15 @@ export default function UsersListCard({
           >
             {exportingUsers ? 'Exportando...' : 'Exportar Excel'}
           </button>
+          {canCreateUsers ? (
+            <button
+              type="button"
+              onClick={onOpenCreateUser}
+              className="rounded-lg bg-primary-700 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-800"
+            >
+              Nuevo usuario
+            </button>
+          ) : null}
         </div>
       </div>
 

@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS users (
   address VARCHAR(240),
   email VARCHAR(160) UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
+  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -253,6 +254,9 @@ ADD COLUMN IF NOT EXISTS phone VARCHAR(30);
 
 ALTER TABLE users
 ADD COLUMN IF NOT EXISTS address VARCHAR(240);
+
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS courses (
   id BIGSERIAL PRIMARY KEY,
@@ -353,6 +357,7 @@ CREATE TABLE IF NOT EXISTS students (
   email VARCHAR(160),
   phone VARCHAR(30),
   address VARCHAR(240),
+  assigned_campus_id BIGINT REFERENCES campuses(id) ON DELETE SET NULL,
   user_id BIGINT UNIQUE REFERENCES users(id) ON DELETE SET NULL,
   created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'INACTIVE')),
@@ -365,6 +370,9 @@ ADD COLUMN IF NOT EXISTS created_by BIGINT REFERENCES users(id) ON DELETE SET NU
 
 ALTER TABLE students
 ADD COLUMN IF NOT EXISTS user_id BIGINT UNIQUE REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE students
+ADD COLUMN IF NOT EXISTS assigned_campus_id BIGINT REFERENCES campuses(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS student_guardian (
   student_id BIGINT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -389,13 +397,31 @@ CREATE TABLE IF NOT EXISTS enrollments (
   student_id BIGINT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
   course_campus_id BIGINT NOT NULL REFERENCES course_campus(id) ON DELETE RESTRICT,
   period_id BIGINT NOT NULL REFERENCES academic_periods(id) ON DELETE RESTRICT,
-  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'SUSPENDED', 'COMPLETED', 'CANCELED')),
+  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
+    CHECK (status IN ('ACTIVE', 'SUSPENDED', 'COMPLETED', 'CANCELED', 'TRANSFERRED')),
   enrollment_date DATE NOT NULL DEFAULT CURRENT_DATE,
   created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (student_id, course_campus_id, period_id)
 );
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'enrollments_status_check'
+  ) THEN
+    ALTER TABLE enrollments
+    DROP CONSTRAINT enrollments_status_check;
+  END IF;
+
+  ALTER TABLE enrollments
+  ADD CONSTRAINT enrollments_status_check
+  CHECK (status IN ('ACTIVE', 'SUSPENDED', 'COMPLETED', 'CANCELED', 'TRANSFERRED'));
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS teacher_assignments (
   id BIGSERIAL PRIMARY KEY,
@@ -635,7 +661,7 @@ CREATE TABLE IF NOT EXISTS payments (
   amount_received NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (amount_received >= 0),
   overpayment_amount NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (overpayment_amount >= 0),
   payment_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  method VARCHAR(30) NOT NULL CHECK (method IN ('YAPE', 'TRANSFERENCIA', 'QR', 'EFECTIVO', 'OTRO')),
+  method VARCHAR(30) NOT NULL CHECK (method IN ('YAPE', 'TRANSFERENCIA', 'QR', 'TARJETA', 'CANJE', 'EFECTIVO', 'OTRO')),
   reference_code VARCHAR(120),
   status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED' CHECK (status IN ('PENDING', 'COMPLETED', 'REJECTED')),
   processed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
@@ -703,6 +729,26 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_by BIGINT REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS student_transfer_requests (
+  id BIGSERIAL PRIMARY KEY,
+  student_id BIGINT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  source_enrollment_id BIGINT NOT NULL REFERENCES enrollments(id) ON DELETE RESTRICT,
+  source_campus_id BIGINT NOT NULL REFERENCES campuses(id) ON DELETE RESTRICT,
+  target_campus_id BIGINT NOT NULL REFERENCES campuses(id) ON DELETE RESTRICT,
+  allow_without_target_offering BOOLEAN NOT NULL DEFAULT FALSE,
+  requested_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  approved_enrollment_id BIGINT REFERENCES enrollments(id) ON DELETE SET NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+    CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'CANCELED')),
+  request_notes VARCHAR(500),
+  review_notes VARCHAR(500),
+  decided_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (source_campus_id <> target_campus_id)
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id BIGSERIAL PRIMARY KEY,
   actor_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
@@ -730,10 +776,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_users_document_number_normalized
   WHERE document_number IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_students_created_by ON students(created_by);
 CREATE INDEX IF NOT EXISTS idx_students_user_id ON students(user_id);
+CREATE INDEX IF NOT EXISTS idx_students_assigned_campus_id ON students(assigned_campus_id);
 CREATE INDEX IF NOT EXISTS idx_student_guardian_guardian_id ON student_guardian(guardian_id);
 CREATE INDEX IF NOT EXISTS idx_enrollments_student_id ON enrollments(student_id);
 CREATE INDEX IF NOT EXISTS idx_enrollments_course_campus_id ON enrollments(course_campus_id);
 CREATE INDEX IF NOT EXISTS idx_enrollments_period_id ON enrollments(period_id);
+CREATE INDEX IF NOT EXISTS idx_student_transfer_requests_source_status_created
+  ON student_transfer_requests(source_campus_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_student_transfer_requests_target_status_created
+  ON student_transfer_requests(target_campus_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_student_transfer_requests_student_created
+  ON student_transfer_requests(student_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_student_transfer_requests_pending_source_enrollment
+  ON student_transfer_requests(source_enrollment_id)
+  WHERE status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_teacher_assignments_teacher ON teacher_assignments(teacher_user_id);
 CREATE INDEX IF NOT EXISTS idx_teacher_assignments_teacher_status_created
   ON teacher_assignments(teacher_user_id, status, created_at DESC);
