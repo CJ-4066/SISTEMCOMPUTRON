@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -7,6 +7,8 @@
 :root {
   color: #16302b;
   background-color: #f4faf8;
+  --font-display: 'Poppins', sans-serif;
+  --font-body: 'Source Sans 3', sans-serif;
 }
 
 * {
@@ -16,12 +18,15 @@
 body {
   margin: 0;
   min-width: 320px;
-  font-family: 'Poppins', sans-serif;
+  font-family: var(--font-body);
+  line-height: 1.5;
   background:
     radial-gradient(circle at 10% 10%, rgba(119, 216, 196, 0.3), transparent 40%),
     radial-gradient(circle at 80% 0%, rgba(255, 216, 151, 0.25), transparent 45%),
     #f4faf8;
   color: #16302b;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -31,8 +36,31 @@ textarea {
   font: inherit;
 }
 
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+
+table,
+.ui-numeric,
+input[type='number'],
+input[type='date'],
+input[type='datetime-local'],
+input[type='time'] {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings:
+    'tnum' 1,
+    'lnum' 1;
+}
+
 .app-input {
-  @apply w-full rounded-xl border border-primary-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200;
+  @apply w-full rounded-xl border border-primary-200 bg-white px-3 py-2 text-[15px] outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200 sm:text-sm;
 }
 
 .card {
@@ -94,6 +122,11 @@ textarea {
 }
 
 .module-stat-value {
+  font-family: var(--font-body);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings:
+    'tnum' 1,
+    'lnum' 1;
   @apply mt-1 text-2xl font-semibold text-primary-900;
 }
 
@@ -148,6 +181,7 @@ textarea {
 }
 
 .grades-panel-title {
+  font-family: var(--font-display);
   letter-spacing: -0.015em;
 }
 

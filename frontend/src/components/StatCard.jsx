@@ -10,7 +10,7 @@ export default function StatCard({ title, value, hint, tone = 'primary', action 
         <p className="text-xs uppercase tracking-[0.18em] text-primary-600">{title}</p>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <p className="mt-2 break-words text-2xl font-semibold sm:text-3xl">{value}</p>
+      <p className="ui-numeric mt-2 break-words text-2xl font-semibold sm:text-3xl">{value}</p>
       <p className="mt-1 text-sm text-primary-700">{hint}</p>
     </article>
   );
