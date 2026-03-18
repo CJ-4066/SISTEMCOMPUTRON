@@ -604,7 +604,7 @@ function TeacherCalendarPage() {
 
       <article className="card space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => moveCursor(-1)}
@@ -632,7 +632,7 @@ function TeacherCalendarPage() {
             {calendarRangeLabel}
           </p>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {VIEW_MODES.map((mode) => (
               <button
                 key={mode}
@@ -708,55 +708,57 @@ function TeacherCalendarPage() {
       <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
         <div className="space-y-4">
           {viewMode === 'month' ? (
-            <article className="card space-y-3">
-              <div className="grid grid-cols-7 gap-2 text-center text-xs font-semibold uppercase text-primary-600">
-                {WEEKDAY_LABELS.map((label) => (
-                  <div key={label}>{label}</div>
-                ))}
-              </div>
-              <div className="grid grid-cols-7 gap-2">
-                {monthDays.map((date) => {
-                  const isCurrentDay = date === toIsoDate(new Date());
-                  const isCursorDay = date === cursorDate;
-                  const dayEvents = eventsByDate[date] || [];
+            <article className="card max-w-full overflow-x-auto">
+              <div className="min-w-[42rem] space-y-3 sm:min-w-0">
+                <div className="grid grid-cols-7 gap-2 text-center text-xs font-semibold uppercase text-primary-600">
+                  {WEEKDAY_LABELS.map((label) => (
+                    <div key={label}>{label}</div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 gap-2">
+                  {monthDays.map((date) => {
+                    const isCurrentDay = date === toIsoDate(new Date());
+                    const isCursorDay = date === cursorDate;
+                    const dayEvents = eventsByDate[date] || [];
 
-                  return (
-                    <button
-                      key={date}
-                      type="button"
-                      onClick={() => {
-                        setCursorDate(date);
-                        openCreateForm(date);
-                      }}
-                      className={`min-h-[130px] rounded-xl border p-2 text-left transition ${
-                        isCursorDay
-                          ? 'border-primary-500 bg-primary-50'
-                          : 'border-primary-100 bg-white hover:bg-primary-50'
-                      }`}
-                    >
-                      <p className={`text-xs font-semibold ${isCurrentDay ? 'text-accent-700' : 'text-primary-700'}`}>
-                        {date.slice(8, 10)}
-                      </p>
-                      <div className="mt-2 space-y-1">
-                        {dayEvents.slice(0, 4).map((event) => (
-                          <div
-                            key={event.id}
-                            onClick={(clickEvent) => {
-                              clickEvent.stopPropagation();
-                              openEditForm(event);
-                            }}
-                            className={`cursor-pointer rounded px-2 py-1 text-[11px] font-medium ${statusPillClass(event.status)}`}
-                          >
-                            {event.start_time} {formatEventTitle(event)}
-                          </div>
-                        ))}
-                        {dayEvents.length > 4 ? (
-                          <p className="px-1 text-[11px] font-semibold text-primary-700">+ {dayEvents.length - 4} más</p>
-                        ) : null}
-                      </div>
-                    </button>
-                  );
-                })}
+                    return (
+                      <button
+                        key={date}
+                        type="button"
+                        onClick={() => {
+                          setCursorDate(date);
+                          openCreateForm(date);
+                        }}
+                        className={`min-h-[110px] rounded-xl border p-2 text-left transition sm:min-h-[130px] ${
+                          isCursorDay
+                            ? 'border-primary-500 bg-primary-50'
+                            : 'border-primary-100 bg-white hover:bg-primary-50'
+                        }`}
+                      >
+                        <p className={`text-xs font-semibold ${isCurrentDay ? 'text-accent-700' : 'text-primary-700'}`}>
+                          {date.slice(8, 10)}
+                        </p>
+                        <div className="mt-2 space-y-1">
+                          {dayEvents.slice(0, 4).map((event) => (
+                            <div
+                              key={event.id}
+                              onClick={(clickEvent) => {
+                                clickEvent.stopPropagation();
+                                openEditForm(event);
+                              }}
+                              className={`cursor-pointer rounded px-2 py-1 text-[11px] font-medium ${statusPillClass(event.status)}`}
+                            >
+                              {event.start_time} {formatEventTitle(event)}
+                            </div>
+                          ))}
+                          {dayEvents.length > 4 ? (
+                            <p className="px-1 text-[11px] font-semibold text-primary-700">+ {dayEvents.length - 4} más</p>
+                          ) : null}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </article>
           ) : null}

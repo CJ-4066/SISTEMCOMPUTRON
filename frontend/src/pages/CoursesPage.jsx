@@ -162,7 +162,7 @@ export default function CoursesPage() {
           <h1 className="text-2xl font-semibold text-primary-900">Cursos y sedes</h1>
           <p className="text-sm text-primary-700">Consulta integrada de cursos disponibles.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <span className="rounded-full bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-800">
             {courses.length} cursos
           </span>

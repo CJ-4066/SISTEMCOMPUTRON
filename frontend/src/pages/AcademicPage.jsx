@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
+import { ClipboardCheck, ClipboardPen, NotebookTabs } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
@@ -455,7 +456,16 @@ export default function AcademicPage() {
             onClick={() => changeTab('assessments')}
             className={`page-tab ${activeTab === 'assessments' ? 'page-tab-active' : ''}`}
           >
-            Evaluaciones
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'assessments' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <ClipboardPen className="h-4 w-4" />
+              </span>
+              <span>Evaluaciones</span>
+            </span>
           </button>
         ) : null}
         {canViewGrades || canManageGrades ? (
@@ -464,7 +474,16 @@ export default function AcademicPage() {
             onClick={() => changeTab('grades')}
             className={`page-tab ${activeTab === 'grades' ? 'page-tab-active' : ''}`}
           >
-            Notas
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'grades' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <NotebookTabs className="h-4 w-4" />
+              </span>
+              <span>Notas</span>
+            </span>
           </button>
         ) : null}
         {canViewAttendance || canManageAttendance ? (
@@ -473,7 +492,16 @@ export default function AcademicPage() {
             onClick={() => changeTab('attendance')}
             className={`page-tab ${activeTab === 'attendance' ? 'page-tab-active' : ''}`}
           >
-            Asistencia
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'attendance' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <ClipboardCheck className="h-4 w-4" />
+              </span>
+              <span>Asistencia</span>
+            </span>
           </button>
         ) : null}
       </div>

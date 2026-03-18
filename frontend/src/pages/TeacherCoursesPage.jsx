@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { BookOpenText, ClipboardCheck } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
@@ -469,7 +470,16 @@ export default function TeacherCoursesPage() {
           onClick={() => changeTab('courses')}
           className={`page-tab ${activeTab === 'courses' ? 'page-tab-active' : ''}`}
         >
-          Cursos y sedes
+          <span className="flex items-center gap-2">
+            <span
+              className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                activeTab === 'courses' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+              }`}
+            >
+              <BookOpenText className="h-4 w-4" />
+            </span>
+            <span>Cursos y sedes</span>
+          </span>
         </button>
         {canUseAttendanceTab ? (
           <button
@@ -477,7 +487,16 @@ export default function TeacherCoursesPage() {
             onClick={() => changeTab('attendance')}
             className={`page-tab ${activeTab === 'attendance' ? 'page-tab-active' : ''}`}
           >
-            Asistencias
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'attendance' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <ClipboardCheck className="h-4 w-4" />
+              </span>
+              <span>Asistencias</span>
+            </span>
           </button>
         ) : null}
       </div>

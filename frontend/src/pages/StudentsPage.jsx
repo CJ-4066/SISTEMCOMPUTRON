@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowLeftRight, GraduationCap, UsersRound } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
@@ -59,6 +60,43 @@ const formatTransferTimestamp = (value) => {
   return parsed.toLocaleString('es-PE');
 };
 
+const normalizeSearchText = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+const buildTransferStudentSearchText = (student) => {
+  const parsedDocument = parseDocumentValue(student?.document_number);
+  const guardians = Array.isArray(student?.guardians) ? student.guardians : [];
+
+  return normalizeSearchText(
+    [
+      student?.first_name,
+      student?.last_name,
+      parsedDocument.document_type,
+      parsedDocument.document_number,
+      student?.email,
+      student?.phone,
+      student?.address,
+      student?.birth_date,
+      student?.assigned_campus_name,
+      student?.assigned_course_name,
+      student?.assigned_period_name,
+      student?.assigned_enrollment_status,
+      ...guardians.flatMap((guardian) => [
+        guardian?.name,
+        guardian?.email,
+        guardian?.phone,
+        guardian?.relationship,
+      ]),
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+};
+
 const STUDENT_RECENT_LIMIT = 10;
 const TRANSFER_REQUEST_NAV_STORAGE_KEY = 'computron:last-transfer-request-token';
 
@@ -105,6 +143,7 @@ export default function StudentsPage() {
   const [error, setError] = useState('');
   const [transferMessage, setTransferMessage] = useState('');
   const [transferError, setTransferError] = useState('');
+  const transferSearchRequestIdRef = useRef(0);
 
   const userRoles = user?.roles || [];
   const isRootAdminProfile = userRoles.includes('ADMIN') && !user?.base_campus_id;
@@ -275,23 +314,31 @@ export default function StudentsPage() {
       }
 
       setTransferStudentLoading(true);
+      const requestId = transferSearchRequestIdRef.current + 1;
+      transferSearchRequestIdRef.current = requestId;
+
       try {
         const response = await api.get('/students', {
           params: {
             q: search || undefined,
             campus_id: canSelectTransferCampus && transferCampusFilter ? Number(transferCampusFilter) : undefined,
             page: 1,
-            page_size: 8,
+            page_size: 20,
           },
           ...(canSelectTransferCampus ? { _skipCampusScope: true } : {}),
         });
+        if (transferSearchRequestIdRef.current !== requestId) return;
+
         setTransferStudentResults(
           (response.data?.items || []).filter((student) => student.assigned_enrollment_status === 'ACTIVE'),
         );
       } catch (requestError) {
+        if (transferSearchRequestIdRef.current !== requestId) return;
         setTransferError(requestError.response?.data?.message || 'No se pudieron cargar alumnos para traslado.');
       } finally {
-        setTransferStudentLoading(false);
+        if (transferSearchRequestIdRef.current === requestId) {
+          setTransferStudentLoading(false);
+        }
       }
     },
     [canManageTransfers, canSelectTransferCampus, transferCampusFilter],
@@ -326,8 +373,16 @@ export default function StudentsPage() {
   useEffect(() => {
     if (activeTab !== 'transfers' || !canManageTransfers) return undefined;
 
+    const normalizedSearch = transferStudentSearch.trim();
+    if (!normalizedSearch) {
+      transferSearchRequestIdRef.current += 1;
+      setTransferStudentLoading(false);
+      setTransferStudentResults([]);
+      return undefined;
+    }
+
     const debounce = setTimeout(() => {
-      loadTransferStudentResults(transferStudentSearch.trim());
+      loadTransferStudentResults(normalizedSearch);
     }, 250);
 
     return () => clearTimeout(debounce);
@@ -480,6 +535,15 @@ export default function StudentsPage() {
       transferRequests.filter((item) => item.direction === 'INCOMING' && item.status === 'PENDING').length,
     [transferRequests],
   );
+
+  const filteredTransferStudentResults = useMemo(() => {
+    const normalizedSearch = normalizeSearchText(transferStudentSearch);
+    if (!normalizedSearch) return transferStudentResults;
+
+    return transferStudentResults.filter((student) =>
+      buildTransferStudentSearchText(student).includes(normalizedSearch),
+    );
+  }, [transferStudentResults, transferStudentSearch]);
 
   const studentAgeLabel = useMemo(
     () => formatAgeLabel(calculateAgeFromBirthDate(studentForm.birth_date)),
@@ -879,7 +943,7 @@ export default function StudentsPage() {
           <h1 className="text-2xl font-semibold text-primary-900">Alumnos y apoderados</h1>
           <p className="text-sm text-primary-700">Registro academico con vistas separadas por tarea.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <span className="rounded-full bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-800">
             {students.length} alumnos
           </span>
@@ -901,7 +965,16 @@ export default function StudentsPage() {
             onClick={() => changeTab('students')}
             className={`page-tab ${activeTab === 'students' ? 'page-tab-active' : ''}`}
           >
-            Alumnos
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'students' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <GraduationCap className="h-4 w-4" />
+              </span>
+              <span>Alumnos</span>
+            </span>
           </button>
         ) : null}
         {canViewGuardians ? (
@@ -910,7 +983,16 @@ export default function StudentsPage() {
             onClick={() => changeTab('guardians')}
             className={`page-tab ${activeTab === 'guardians' ? 'page-tab-active' : ''}`}
           >
-            Apoderados
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'guardians' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <UsersRound className="h-4 w-4" />
+              </span>
+              <span>Apoderados</span>
+            </span>
           </button>
         ) : null}
         {canViewTransfers ? (
@@ -919,7 +1001,25 @@ export default function StudentsPage() {
             onClick={() => changeTab('transfers')}
             className={`page-tab ${activeTab === 'transfers' ? 'page-tab-active' : ''}`}
           >
-            Traslados{pendingIncomingTransfers > 0 ? ` (${pendingIncomingTransfers})` : ''}
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'transfers' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <ArrowLeftRight className="h-4 w-4" />
+              </span>
+              <span>Traslados</span>
+              {pendingIncomingTransfers > 0 ? (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    activeTab === 'transfers' ? 'bg-white/20 text-white' : 'bg-accent-100 text-accent-800'
+                  }`}
+                >
+                  {pendingIncomingTransfers}
+                </span>
+              ) : null}
+            </span>
           </button>
         ) : null}
       </div>
@@ -1366,8 +1466,9 @@ export default function StudentsPage() {
               <div>
                 <h3 className="text-base font-semibold text-primary-900">Seleccionar alumno</h3>
                 <p className="text-sm text-primary-700">
-                  Busca por nombre o documento. Al elegir un alumno, el sistema carga su matricula activa y filtra la
-                  sede donde esta asignado. Aqui solo se listan alumnos con matricula activa.
+                  Busca por cualquier dato del alumno: nombre, documento, telefono, correo, direccion, sede, curso,
+                  periodo o datos del apoderado. Al elegirlo, el sistema carga su matricula activa para preparar el
+                  traslado.
                 </p>
               </div>
 
@@ -1391,10 +1492,12 @@ export default function StudentsPage() {
                 ) : null}
 
                 <label className="space-y-1">
-                  <span className="text-xs font-semibold text-primary-700">Alumno</span>
+                  <span className="text-xs font-semibold text-primary-700">Buscador de alumno</span>
                   <input
                     className="app-input"
-                    placeholder="Buscar alumno por nombre o numero de documento"
+                    type="search"
+                    autoComplete="off"
+                    placeholder="Buscar por nombre, documento, telefono, correo, sede, curso o apoderado"
                     value={transferStudentSearch}
                     onChange={(event) => setTransferStudentSearch(event.target.value)}
                   />
@@ -1405,9 +1508,17 @@ export default function StudentsPage() {
                 <p className="text-sm text-primary-700">Buscando alumnos...</p>
               ) : null}
 
-              {!transferStudentLoading && transferStudentResults.length > 0 ? (
+              {!transferStudentLoading && transferStudentSearch.trim() ? (
+                <p className="text-xs font-medium text-primary-700">
+                  {filteredTransferStudentResults.length} alumno
+                  {filteredTransferStudentResults.length === 1 ? '' : 's'} encontrado
+                  {filteredTransferStudentResults.length === 1 ? '' : 's'} para ese criterio.
+                </p>
+              ) : null}
+
+              {!transferStudentLoading && filteredTransferStudentResults.length > 0 ? (
                 <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                  {transferStudentResults.map((student) => {
+                  {filteredTransferStudentResults.map((student) => {
                     const parsedDocument = parseDocumentValue(student.document_number);
                     return (
                       <button
@@ -1442,11 +1553,11 @@ export default function StudentsPage() {
                 </div>
               ) : null}
 
-              {!transferStudentLoading && transferStudentResults.length === 0 ? (
+              {!transferStudentLoading && filteredTransferStudentResults.length === 0 ? (
                 <p className="text-sm text-primary-700">
                   {transferStudentSearch.trim()
-                    ? 'No se encontraron alumnos para ese criterio.'
-                    : 'Escribe un nombre o documento para seleccionar al alumno que vas a trasladar.'}
+                    ? 'No se encontraron alumnos con ese criterio de busqueda.'
+                    : 'Escribe cualquier dato del alumno para filtrar y seleccionar a quien vas a trasladar.'}
                 </p>
               ) : null}
             </div>

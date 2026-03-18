@@ -1,5 +1,22 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
+import {
+  BookOpenText,
+  CalendarRange,
+  ClipboardCheck,
+  FileBadge,
+  House,
+  LayoutDashboard,
+  LibraryBig,
+  LogOut,
+  Menu,
+  NotebookTabs,
+  ReceiptText,
+  School,
+  ShieldCheck,
+  UsersRound,
+  Wallet,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
 import { MANAGEMENT_SECTION_ITEMS, buildManagementSectionPath } from '../constants/managementSections';
@@ -7,31 +24,35 @@ import { DASHBOARD_SECTION_ITEMS, buildDashboardSectionPath } from '../constants
 import { preloadCoreRoutes, preloadRoute } from '../utils/routePreload';
 
 const navItems = [
-  { to: '/', label: 'Dashboard', permissions: [PERMISSIONS.DASHBOARD_VIEW] },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, permissions: [PERMISSIONS.DASHBOARD_VIEW] },
   {
     to: '/courses?tab=attendance',
     label: 'Asistencias',
+    icon: ClipboardCheck,
     permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW, PERMISSIONS.ACADEMIC_ATTENDANCE_MANAGE],
   },
   {
     to: '/calendar',
     label: 'Calendario',
+    icon: CalendarRange,
     permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW],
   },
   {
     to: '/virtual-library',
     label: 'Biblioteca virtual',
+    icon: LibraryBig,
     permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW],
     adminOnly: true,
   },
-  { to: '/payments', label: 'Reporte de pagos', permissions: [PERMISSIONS.PAYMENTS_VIEW] },
+  { to: '/payments', label: 'Reporte de pagos', icon: ReceiptText, permissions: [PERMISSIONS.PAYMENTS_VIEW] },
   {
     to: '/certificate-library',
     label: 'Biblioteca de certificados',
+    icon: FileBadge,
     permissions: [PERMISSIONS.PAYMENTS_VIEW, PERMISSIONS.PAYMENTS_MANAGE],
   },
-  { to: '/certificates', label: 'Certificados', permissions: [PERMISSIONS.PAYMENTS_VIEW] },
-  { to: '/users', label: 'Usuarios', permissions: [PERMISSIONS.USERS_VIEW] },
+  { to: '/certificates', label: 'Certificados', icon: ShieldCheck, permissions: [PERMISSIONS.PAYMENTS_VIEW] },
+  { to: '/users', label: 'Usuarios', icon: UsersRound, permissions: [PERMISSIONS.USERS_VIEW] },
 ];
 
 const ChevronIcon = ({ className = '' }) => (
@@ -41,11 +62,11 @@ const ChevronIcon = ({ className = '' }) => (
 );
 
 const studentNavItems = [
-  { to: '/courses', label: 'Mis cursos' },
-  { to: '/my-grades', label: 'Mis notas' },
-  { to: '/calendar', label: 'Mi calendario' },
-  { to: '/payments', label: 'Mis pagos' },
-  { to: '/certificates', label: 'Certificados' },
+  { to: '/courses', label: 'Mis cursos', icon: BookOpenText },
+  { to: '/my-grades', label: 'Mis notas', icon: NotebookTabs },
+  { to: '/calendar', label: 'Mi calendario', icon: CalendarRange },
+  { to: '/payments', label: 'Mis pagos', icon: Wallet },
+  { to: '/certificates', label: 'Certificados', icon: FileBadge },
 ];
 
 export default function AppShell() {
@@ -157,6 +178,32 @@ export default function AppShell() {
   const resolvedItems = isAlumnoProfile ? studentNavItems : secondaryItems;
 
   const isCertificatesRoute = location.pathname === '/certificates';
+  const dashboardMenuActive = isDashboardRoute || isDashboardExpanded;
+  const managementMenuActive = isManagementRoute || isStudentTransfersRoute || isManagementExpanded;
+
+  const renderSidebarLabel = (label, Icon, active, { trailing = null, compact = false } = {}) => (
+    <span className="flex items-center justify-between gap-3">
+      <span className="flex min-w-0 items-center gap-3">
+        {Icon ? (
+          <span
+            className={`flex shrink-0 items-center justify-center ${
+              compact ? 'h-7 w-7 rounded-lg' : 'h-8 w-8 rounded-xl'
+            } transition ${
+              active
+                ? 'bg-white/15 text-white'
+                : 'bg-primary-800/90 text-accent-100 group-hover:bg-primary-700 group-hover:text-white'
+            }`}
+          >
+            <Icon className={compact ? 'h-4 w-4' : 'h-4 w-4'} />
+          </span>
+        ) : null}
+        <span className={compact ? 'truncate text-xs font-semibold uppercase tracking-[0.08em]' : 'truncate'}>
+          {label}
+        </span>
+      </span>
+      {trailing}
+    </span>
+  );
 
   useEffect(() => {
     if (!isDashboardRoute) {
@@ -208,9 +255,9 @@ export default function AppShell() {
   };
 
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[260px_1fr]">
+    <div className="min-h-screen lg:grid lg:grid-cols-[260px_minmax(0,1fr)]">
       <aside
-        className={`fixed left-0 top-0 z-20 h-full w-[260px] transform border-r border-primary-200 bg-primary-900 text-primary-50 transition lg:static lg:translate-x-0 ${
+        className={`fixed left-0 top-0 z-20 flex h-full w-[260px] transform flex-col overflow-y-auto border-r border-primary-200 bg-primary-900 text-primary-50 transition lg:static lg:translate-x-0 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -221,7 +268,7 @@ export default function AppShell() {
           <p className="text-xs text-primary-300">{roles.join(' · ')}</p>
         </div>
 
-        <nav className="space-y-1 p-3">
+        <nav className="flex-1 space-y-1 p-3 pb-5">
           {isAlumnoProfile ? (
             resolvedItems.map((item) => (
               <NavLink
@@ -232,14 +279,14 @@ export default function AppShell() {
                 onMouseEnter={() => preloadRoute(item.to)}
                 onFocus={() => preloadRoute(item.to)}
                 className={({ isActive }) =>
-                  `block rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  `group block rounded-xl px-3 py-2 text-sm font-medium transition ${
                     isNavItemActive(item.to, isActive)
                       ? 'bg-primary-500 text-white'
                       : 'text-primary-100 hover:bg-primary-800 hover:text-white'
                   }`
                 }
               >
-                {item.label}
+                {({ isActive }) => renderSidebarLabel(item.label, item.icon, isNavItemActive(item.to, isActive))}
               </NavLink>
             ))
           ) : (
@@ -252,17 +299,16 @@ export default function AppShell() {
                     onMouseEnter={() => preloadRoute('/')}
                     onFocus={() => preloadRoute('/')}
                     className={
-                      `block rounded-xl px-3 py-2 text-sm font-medium transition ${
-                        isDashboardRoute || isDashboardExpanded
+                      `group block w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${
+                        dashboardMenuActive
                           ? 'bg-primary-500 text-white'
                           : 'text-primary-100 hover:bg-primary-800 hover:text-white'
                       }`
                     }
                   >
-                    <span className="flex items-center justify-between gap-2">
-                      <span>Dashboard</span>
-                      <ChevronIcon className={`h-4 w-4 transition ${isDashboardExpanded ? 'rotate-180' : ''}`} />
-                    </span>
+                    {renderSidebarLabel('Dashboard', House, dashboardMenuActive, {
+                      trailing: <ChevronIcon className={`h-4 w-4 transition ${isDashboardExpanded ? 'rotate-180' : ''}`} />,
+                    })}
                   </button>
 
                   <div
@@ -281,14 +327,14 @@ export default function AppShell() {
                             onMouseEnter={() => preloadRoute('/')}
                             onFocus={() => preloadRoute('/')}
                             className={() =>
-                              `block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${
+                              `group block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${
                                 isSubItemActive
                                   ? 'bg-primary-800 text-white'
                                   : 'text-primary-200 hover:bg-primary-800 hover:text-white'
                               }`
                             }
                           >
-                            {item.label}
+                            {renderSidebarLabel(item.label, item.icon, isSubItemActive, { compact: true })}
                           </NavLink>
                         );
                       })}
@@ -305,17 +351,16 @@ export default function AppShell() {
                     onMouseEnter={() => preloadRoute('/management')}
                     onFocus={() => preloadRoute('/management')}
                     className={
-                      `block rounded-xl px-3 py-2 text-sm font-medium transition ${
-                        isManagementRoute || isStudentTransfersRoute || isManagementExpanded
+                      `group block w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${
+                        managementMenuActive
                           ? 'bg-primary-500 text-white'
                           : 'text-primary-100 hover:bg-primary-800 hover:text-white'
                       }`
                     }
                   >
-                    <span className="flex items-center justify-between gap-2">
-                      <span>Gestión académica</span>
-                      <ChevronIcon className={`h-4 w-4 transition ${isManagementExpanded ? 'rotate-180' : ''}`} />
-                    </span>
+                    {renderSidebarLabel('Gestión académica', School, managementMenuActive, {
+                      trailing: <ChevronIcon className={`h-4 w-4 transition ${isManagementExpanded ? 'rotate-180' : ''}`} />,
+                    })}
                   </button>
 
                   <div
@@ -336,14 +381,14 @@ export default function AppShell() {
                             onMouseEnter={() => preloadRoute(itemPath)}
                             onFocus={() => preloadRoute(itemPath)}
                             className={() =>
-                              `block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${
+                              `group block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${
                                 isSubItemActive
                                   ? 'bg-primary-800 text-white'
                                   : 'text-primary-200 hover:bg-primary-800 hover:text-white'
                               }`
                             }
                           >
-                            {item.label}
+                            {renderSidebarLabel(item.label, item.icon, isSubItemActive, { compact: true })}
                           </NavLink>
                         );
                       })}
@@ -361,39 +406,45 @@ export default function AppShell() {
                   onMouseEnter={() => preloadRoute(item.to)}
                   onFocus={() => preloadRoute(item.to)}
                   className={({ isActive }) =>
-                    `block rounded-xl px-3 py-2 text-sm font-medium transition ${
+                    `group block rounded-xl px-3 py-2 text-sm font-medium transition ${
                       isNavItemActive(item.to, isActive)
                         ? 'bg-primary-500 text-white'
                         : 'text-primary-100 hover:bg-primary-800 hover:text-white'
                     }`
                   }
                 >
-                  {item.label}
+                  {({ isActive }) => renderSidebarLabel(item.label, item.icon, isNavItemActive(item.to, isActive))}
                 </NavLink>
               ))}
             </>
           )}
         </nav>
 
-        <div className="absolute bottom-0 w-full border-t border-primary-700 p-3">
+        <div className="mt-auto border-t border-primary-700 p-3">
           <button
             type="button"
             onClick={handleLogout}
             className="w-full rounded-xl border border-primary-300 px-3 py-2 text-sm font-medium text-primary-50 transition hover:bg-primary-800"
           >
-            Cerrar sesión
+            <span className="flex items-center justify-center gap-2">
+              <LogOut className="h-4 w-4" />
+              <span>Cerrar sesión</span>
+            </span>
           </button>
         </div>
       </aside>
 
-      <div className="min-h-screen lg:ml-0">
-        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-primary-100 bg-white/90 px-4 py-3 backdrop-blur">
+      <div className="min-h-screen min-w-0 lg:ml-0">
+        <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-primary-100 bg-white/90 px-4 py-3 backdrop-blur">
           <button
             type="button"
             onClick={() => setOpen((value) => !value)}
             className="rounded-lg border border-primary-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide lg:hidden"
           >
-            Menú
+            <span className="flex items-center gap-2">
+              <Menu className="h-4 w-4" />
+              <span>Menú</span>
+            </span>
           </button>
           <h2 className="text-lg font-semibold text-primary-800">Sistema de Gestión</h2>
           <span className="rounded-full bg-accent-100 px-3 py-1 text-xs font-semibold text-accent-700">
@@ -401,7 +452,7 @@ export default function AppShell() {
           </span>
         </header>
 
-        <main className={isCertificatesRoute ? 'w-full p-2 md:p-3' : 'mx-auto w-full max-w-7xl p-4 md:p-6'}>
+        <main className={isCertificatesRoute ? 'w-full min-w-0 p-2 md:p-3' : 'mx-auto w-full max-w-7xl min-w-0 p-3 sm:p-4 md:p-6'}>
           <Outlet />
         </main>
       </div>

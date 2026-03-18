@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
+import { CalendarRange, NotebookPen, Wallet } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
@@ -360,7 +361,7 @@ export default function EnrollmentsPage() {
           <h1 className="text-2xl font-semibold text-primary-900">Matriculas y cuotas</h1>
           <p className="text-sm text-primary-700">Vista operacional separada por tipo de gestion.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <span className="rounded-full bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-800">
             {enrollments.length} matriculas
           </span>
@@ -377,7 +378,16 @@ export default function EnrollmentsPage() {
             onClick={() => changeTab('enrollments')}
             className={`page-tab ${activeTab === 'enrollments' ? 'page-tab-active' : ''}`}
           >
-            Matriculas
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'enrollments' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <NotebookPen className="h-4 w-4" />
+              </span>
+              <span>Matriculas</span>
+            </span>
           </button>
         ) : null}
         {canViewInstallments || canManageInstallments ? (
@@ -386,7 +396,16 @@ export default function EnrollmentsPage() {
             onClick={() => changeTab('installments')}
             className={`page-tab ${activeTab === 'installments' ? 'page-tab-active' : ''}`}
           >
-            Cuotas
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'installments' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <Wallet className="h-4 w-4" />
+              </span>
+              <span>Cuotas</span>
+            </span>
           </button>
         ) : null}
         {canViewPeriods || canManagePeriods ? (
@@ -395,7 +414,16 @@ export default function EnrollmentsPage() {
             onClick={() => changeTab('periods')}
             className={`page-tab ${activeTab === 'periods' ? 'page-tab-active' : ''}`}
           >
-            Periodos
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'periods' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <CalendarRange className="h-4 w-4" />
+              </span>
+              <span>Periodos</span>
+            </span>
           </button>
         ) : null}
       </div>
@@ -407,7 +435,7 @@ export default function EnrollmentsPage() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-end gap-2">
             <select
-              className="app-input min-w-[170px]"
+              className="app-input w-full sm:min-w-[170px]"
               value={receiptFormat}
               onChange={(event) => setReceiptFormat(event.target.value)}
             >
@@ -626,7 +654,7 @@ export default function EnrollmentsPage() {
                 La fecha de matrícula es el día en que se registra la inscripción del alumno.
               </p>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button className="rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700">
                   Guardar matrícula completa
                 </button>

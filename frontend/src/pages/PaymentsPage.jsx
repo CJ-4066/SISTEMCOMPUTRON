@@ -856,7 +856,7 @@ function StaffPaymentsPage() {
             Selecciona alumno, valida sus cuotas pendientes y registra pago con cálculo automático.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <span className="rounded-full bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-800">
             {payments.length} pagos cargados
           </span>

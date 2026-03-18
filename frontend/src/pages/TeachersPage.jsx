@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { Navigate } from 'react-router-dom';
+import { BriefcaseBusiness, ClipboardCheck } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
@@ -347,7 +348,7 @@ export default function TeachersPage() {
           <h1 className="text-2xl font-semibold text-primary-900">Docentes y carga academica</h1>
           <p className="text-sm text-primary-700">Operacion separada entre registro de docentes y asignaciones.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <span className="rounded-full bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-800">
             {teachers.length} docentes
           </span>
@@ -364,7 +365,16 @@ export default function TeachersPage() {
             onClick={() => changeTab('assignments')}
             className={`page-tab ${activeTab === 'assignments' ? 'page-tab-active' : ''}`}
           >
-            Asignaciones
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'assignments' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <ClipboardCheck className="h-4 w-4" />
+              </span>
+              <span>Asignaciones</span>
+            </span>
           </button>
         ) : null}
         {canViewTeachers || canCreateUsers || canManageTeacherProfile ? (
@@ -373,7 +383,16 @@ export default function TeachersPage() {
             onClick={() => changeTab('teachers')}
             className={`page-tab ${activeTab === 'teachers' ? 'page-tab-active' : ''}`}
           >
-            Docentes
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeTab === 'teachers' ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                }`}
+              >
+                <BriefcaseBusiness className="h-4 w-4" />
+              </span>
+              <span>Docentes</span>
+            </span>
           </button>
         ) : null}
       </div>
@@ -721,7 +740,7 @@ export default function TeachersPage() {
                 />
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button className="rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700">
                   {editingTeacherId ? 'Guardar cambios' : 'Guardar docente'}
                 </button>

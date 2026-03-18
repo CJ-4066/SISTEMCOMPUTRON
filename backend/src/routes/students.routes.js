@@ -60,6 +60,7 @@ const studentListSchema = z.object({
   query: z
     .object({
       q: z.string().trim().max(120).optional(),
+      campus_id: z.coerce.number().int().positive().optional(),
       page: z.coerce.number().int().positive().optional(),
       page_size: z.coerce.number().int().min(1).max(100).optional(),
     })
@@ -281,10 +282,30 @@ router.get(
           s.first_name,
           s.last_name,
           s.document_number,
+          TO_CHAR(s.birth_date, 'YYYY-MM-DD'),
           COALESCE(s.email, ''),
           COALESCE(s.phone, ''),
-          COALESCE(s.address, '')
+          COALESCE(s.address, ''),
+          COALESCE(cp_assigned.name, '')
         ) ILIKE '%' || $1 || '%'
+        OR EXISTS (
+          SELECT 1
+          FROM enrollments e_search
+          JOIN course_campus cc_search ON cc_search.id = e_search.course_campus_id
+          JOIN courses c_search ON c_search.id = cc_search.course_id
+          JOIN campuses cp_search ON cp_search.id = cc_search.campus_id
+          JOIN academic_periods ap_search ON ap_search.id = e_search.period_id
+          WHERE e_search.student_id = s.id
+            AND e_search.status <> 'TRANSFERRED'
+            AND CONCAT_WS(
+              ' ',
+              c_search.name,
+              cp_search.name,
+              ap_search.name,
+              COALESCE(cc_search.modality, ''),
+              COALESCE(e_search.status, '')
+            ) ILIKE '%' || $1 || '%'
+        )
         OR EXISTS (
           SELECT 1
           FROM student_guardian sgx
@@ -296,7 +317,8 @@ router.get(
               gx.last_name,
               COALESCE(gx.email, ''),
               COALESCE(gx.phone, ''),
-              COALESCE(gx.document_number, '')
+              COALESCE(gx.document_number, ''),
+              COALESCE(sgx.relationship, '')
             ) ILIKE '%' || $1 || '%'
         )
       )

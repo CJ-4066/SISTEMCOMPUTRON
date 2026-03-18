@@ -2087,16 +2087,32 @@ export default function ManagementPage() {
       <div className="page-tabs">
         {tabs
           .filter((tab) => tab.enabled)
-          .map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => changeTab(tab.key)}
-              className={`page-tab ${activeTab === tab.key ? 'page-tab-active' : ''}`}
-            >
-              {tab.label}
-            </button>
-          ))}
+          .map((tab) => {
+            const isActive = activeTab === tab.key;
+            const TabIcon = tab.icon;
+
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => changeTab(tab.key)}
+                className={`page-tab ${isActive ? 'page-tab-active' : ''}`}
+              >
+                <span className="flex items-center gap-2">
+                  {TabIcon ? (
+                    <span
+                      className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-600'
+                      }`}
+                    >
+                      <TabIcon className="h-4 w-4" />
+                    </span>
+                  ) : null}
+                  <span>{tab.label}</span>
+                </span>
+              </button>
+            );
+          })}
       </div>
 
       {message ? <p className="rounded-xl bg-primary-50 p-3 text-sm text-primary-800">{message}</p> : null}
