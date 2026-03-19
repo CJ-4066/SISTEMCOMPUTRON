@@ -40,6 +40,7 @@ export const createCredentialForm = (targetUser = {}) => {
 export const createNewUserForm = (role = DEFAULT_CREATE_ROLE) => ({
   ...INITIAL_CREDENTIAL_FORM,
   role,
+  base_campus_id: '',
 });
 
 export const buildUserExportRows = (users = []) =>
@@ -48,6 +49,7 @@ export const buildUserExportRows = (users = []) =>
     usuario: `${item.first_name || ''} ${item.last_name || ''}`.trim(),
     documento: item.document_number || '',
     correo: item.email || '',
+    sede: item.base_campus_name || (getPrimaryRole(item.roles) === 'ADMIN' ? 'Todas las sedes' : 'Sin sede'),
     activo: item.is_active ? 'SI' : 'NO',
     roles: (item.roles || []).join(' | '),
     creado_en: item.created_at ? new Date(item.created_at).toLocaleString() : '',

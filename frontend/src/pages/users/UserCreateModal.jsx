@@ -38,6 +38,9 @@ export default function UserCreateModal({
   onSave,
   canManageRoles,
   isRootAdmin,
+  creatorHasCampusScope,
+  campuses,
+  loadingCampuses,
   showPassword,
   onTogglePassword,
   canManagePermissions,
@@ -194,7 +197,7 @@ export default function UserCreateModal({
                   className="app-input"
                   value={form.role}
                   onChange={bindField('role')}
-                  disabled={!canManageRoles || !isRootAdmin}
+                  disabled={!canManageRoles}
                 >
                   {AVAILABLE_ROLES.map((role) => (
                     <option key={role} value={role}>
@@ -205,10 +208,44 @@ export default function UserCreateModal({
                 {!canManageRoles ? (
                   <span className="block text-xs text-primary-600">No tienes permiso para gestionar roles.</span>
                 ) : null}
-                {canManageRoles && !isRootAdmin ? (
-                  <span className="block text-xs text-primary-600">Solo el admin raíz puede elegir el rol.</span>
+                {canManageRoles && creatorHasCampusScope ? (
+                  <span className="block text-xs text-primary-600">
+                    Si creas un ADMIN desde una sede específica, ese nuevo admin quedará limitado a tu misma sede.
+                  </span>
                 ) : null}
               </label>
+
+              {canManageRoles && isAdminRole && isRootAdmin ? (
+                <label className="space-y-1 text-sm text-primary-800">
+                  <span className="font-medium">Alcance por sede del administrador</span>
+                  <select
+                    className="app-input"
+                    value={form.base_campus_id || ''}
+                    onChange={bindField('base_campus_id')}
+                    disabled={!isAdminRole || loadingCampuses}
+                  >
+                    <option value="">Todas las sedes</option>
+                    {campuses.map((campus) => (
+                      <option key={campus.id} value={campus.id}>
+                        {campus.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="block text-xs text-primary-600">
+                    Déjalo en "Todas las sedes" para crear un admin raíz, o elige una sede para limitarlo a una sola.
+                  </span>
+                </label>
+              ) : null}
+
+              {canManageRoles && isAdminRole && creatorHasCampusScope && !isRootAdmin ? (
+                <div className="space-y-1 rounded-xl border border-primary-100 bg-primary-50 px-3 py-3 text-sm text-primary-800">
+                  <span className="font-medium">Alcance por sede del administrador</span>
+                  <p className="text-sm text-primary-700">
+                    Este nuevo administrador heredará automáticamente tu sede actual. Desde esta cuenta no se puede
+                    asignar otra sede ni acceso global.
+                  </p>
+                </div>
+              ) : null}
 
               <label className="space-y-1 text-sm text-primary-800">
                 <span className="font-medium">Teléfono</span>

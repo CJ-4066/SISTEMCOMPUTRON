@@ -147,6 +147,13 @@ router.post(
       if (!canCreateUsers) {
         throw new ApiError(403, 'No tiene permisos para registrar usuarios.');
       }
+      const canManageRoles = await userHasPermission(req.user.id, 'users.roles.manage');
+      const requestedRoles = Array.from(new Set((roles || []).filter(Boolean)));
+      const isDefaultRoleRequest =
+        requestedRoles.length === 1 && requestedRoles[0] === 'SECRETARIADO';
+      if (!canManageRoles && !isDefaultRoleRequest) {
+        throw new ApiError(403, 'No tiene permisos para elegir roles personalizados al crear usuarios.');
+      }
 
       const creatorResult = await query(
         `SELECT base_campus_id

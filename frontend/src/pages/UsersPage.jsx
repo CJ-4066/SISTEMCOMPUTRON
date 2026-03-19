@@ -48,6 +48,8 @@ export default function UsersPage() {
   const [showCreatePassword, setShowCreatePassword] = useState(false);
   const [createAccessPermissions, setCreateAccessPermissions] = useState([]);
   const [createAccessMenuLevel, setCreateAccessMenuLevel] = useState('MAIN');
+  const [campuses, setCampuses] = useState([]);
+  const [loadingCampuses, setLoadingCampuses] = useState(false);
   const [rolePermissionTemplates, setRolePermissionTemplates] = useState(null);
   const [loadingRolePermissionTemplates, setLoadingRolePermissionTemplates] = useState(false);
 
@@ -70,7 +72,9 @@ export default function UsersPage() {
   const canManageRoles = hasPermission(PERMISSIONS.USERS_ROLES_MANAGE);
   const canManageStatus = hasPermission(PERMISSIONS.USERS_STATUS_MANAGE);
   const canManagePermissions = hasPermission(PERMISSIONS.USERS_PERMISSIONS_MANAGE);
-  const isRootAdmin = (user?.roles || []).includes(ROLE_ADMIN);
+  const canReadCampuses = hasPermission(PERMISSIONS.CAMPUSES_VIEW) || hasPermission(PERMISSIONS.CAMPUSES_MANAGE);
+  const isRootAdmin = (user?.roles || []).includes(ROLE_ADMIN) && !user?.base_campus_id;
+  const creatorHasCampusScope = Boolean(user?.base_campus_id);
 
   const canOpenEditor = canManageStatus || canManagePermissions || (canManageRoles && isRootAdmin);
   const canConfigureCreateAccess = canManagePermissions && rolePermissionTemplates !== null;
@@ -192,6 +196,23 @@ export default function UsersPage() {
     }
   }, [canManagePermissions]);
 
+  const loadCampuses = useCallback(async () => {
+    if (!canReadCampuses) {
+      setCampuses([]);
+      return;
+    }
+
+    setLoadingCampuses(true);
+    try {
+      const response = await api.get('/campuses', { _skipCampusScope: true });
+      setCampuses(response.data?.items || []);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'No se pudieron cargar las sedes.');
+    } finally {
+      setLoadingCampuses(false);
+    }
+  }, [canReadCampuses]);
+
   useEffect(() => {
     const debounce = setTimeout(() => {
       setUserPage(1);
@@ -262,6 +283,7 @@ export default function UsersPage() {
           { key: 'usuario', label: 'Usuario' },
           { key: 'documento', label: 'Documento' },
           { key: 'correo', label: 'Correo' },
+          { key: 'sede', label: 'Sede' },
           { key: 'activo', label: 'Activo' },
           { key: 'roles', label: 'Roles' },
           { key: 'creado_en', label: 'Creado en' },
@@ -306,6 +328,9 @@ export default function UsersPage() {
 
     if (canManagePermissions && rolePermissionTemplates === null && !loadingRolePermissionTemplates) {
       loadRolePermissionTemplates();
+    }
+    if (canManageRoles && isRootAdmin && canReadCampuses && campuses.length === 0 && !loadingCampuses) {
+      loadCampuses();
     }
   };
 
@@ -376,6 +401,7 @@ export default function UsersPage() {
     setCreateUserForm((prev) => ({
       ...prev,
       [field]: value,
+      ...(field === 'role' && value !== ROLE_ADMIN ? { base_campus_id: '' } : {}),
     }));
   }, []);
 
@@ -430,7 +456,11 @@ export default function UsersPage() {
     const normalizedPhone = createUserForm.phone.trim();
     const normalizedAddress = createUserForm.address.trim();
     const normalizedRole =
-      canManageRoles && isRootAdmin ? (createUserForm.role || DEFAULT_CREATE_ROLE).trim() : DEFAULT_CREATE_ROLE;
+      canManageRoles ? (createUserForm.role || DEFAULT_CREATE_ROLE).trim() : DEFAULT_CREATE_ROLE;
+    const adminBaseCampusId =
+      normalizedRole === ROLE_ADMIN && canManageRoles && isRootAdmin && createUserForm.base_campus_id
+        ? Number(createUserForm.base_campus_id)
+        : null;
     const useEmailAsPassword = Boolean(createUserForm.use_email_as_password);
     const resolvedPassword = useEmailAsPassword ? normalizedEmail : createUserForm.password;
 
@@ -479,6 +509,7 @@ export default function UsersPage() {
       email: normalizedEmail,
       password: resolvedPassword,
       roles: [normalizedRole],
+      ...(normalizedRole === ROLE_ADMIN && canManageRoles && isRootAdmin ? { base_campus_id: adminBaseCampusId } : {}),
       must_change_password: useEmailAsPassword,
     };
     const normalizedCreateAccess = sortUnique(createAccessPermissions);
@@ -688,6 +719,9 @@ export default function UsersPage() {
         onSave={saveNewUser}
         canManageRoles={canManageRoles}
         isRootAdmin={isRootAdmin}
+        creatorHasCampusScope={creatorHasCampusScope}
+        campuses={campuses}
+        loadingCampuses={loadingCampuses}
         showPassword={showCreatePassword}
         onTogglePassword={() => setShowCreatePassword((prev) => !prev)}
         canManagePermissions={canManagePermissions}

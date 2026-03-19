@@ -89,6 +89,7 @@ export default function UsersListCard({
             <th className="pb-2 pr-3">Usuario</th>
             <th className="pb-2 pr-3">Documento</th>
             <th className="pb-2 pr-3">Correo</th>
+            <th className="pb-2 pr-3">Sede</th>
             <th className="pb-2 pr-3">Activo</th>
             <th className="pb-2">Rol</th>
             <th className="pb-2 pl-3">Acciones</th>
@@ -105,6 +106,9 @@ export default function UsersListCard({
                 </td>
                 <td className="py-2 pr-3">{targetUser.document_number || '-'}</td>
                 <td className="py-2 pr-3">{targetUser.email}</td>
+                <td className="py-2 pr-3">
+                  {targetUser.base_campus_name || (getPrimaryRole(targetUser.roles) === 'ADMIN' ? 'Todas las sedes' : 'Sin sede')}
+                </td>
                 <td className="py-2 pr-3">
                   <div className="flex items-center gap-2">
                     <button
@@ -152,7 +156,7 @@ export default function UsersListCard({
 
           {!loadingUsers && users.length === 0 ? (
             <tr>
-              <td colSpan={6} className="py-4 text-center text-sm text-primary-600">
+              <td colSpan={7} className="py-4 text-center text-sm text-primary-600">
                 No se encontraron usuarios con ese criterio.
               </td>
             </tr>
