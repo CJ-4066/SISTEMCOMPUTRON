@@ -782,7 +782,9 @@
         const state = {
           photoObjectUrl: null,
           exportingPdf: false,
-          draftCampusId: null
+          draftCampusId: null,
+          draftStudentId: null,
+          draftEnrollmentId: null
         };
         const AUTH_STORAGE_KEY = "computron_auth";
         const CERTIFICATE_DRAFT_STORAGE_PREFIX = "computron:certificate-generator-draft:";
@@ -846,7 +848,9 @@
             issue_date: getInputValue("issueDateInput") || null,
             city: getInputValue("cityInput") || null,
             organization: getInputValue("organizationInput") || null,
-            campus_id: resolvedCampusId
+            campus_id: resolvedCampusId,
+            student_id: state.draftStudentId,
+            enrollment_id: state.draftEnrollmentId
           };
         };
 
@@ -1055,6 +1059,8 @@
           if (!draft) return;
 
           state.draftCampusId = Number(draft.campus_id || 0) || null;
+          state.draftStudentId = Number(draft.student_id || 0) || null;
+          state.draftEnrollmentId = Number(draft.enrollment_id || 0) || null;
 
           const mapping = {
             student_name: "studentNameInput",

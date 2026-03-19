@@ -6,6 +6,10 @@ const ApiError = require('../utils/apiError');
 const validate = require('../middlewares/validate');
 const { authenticate, authorizePermission } = require('../middlewares/auth');
 const { parseCampusScopeId } = require('../utils/campusScope');
+const {
+  decorateEnrollmentWithCertificateEligibility,
+  pickPreferredCertificateEnrollment,
+} = require('../utils/certificateEligibility');
 
 const router = express.Router();
 
@@ -36,6 +40,13 @@ const nullableInteger = (min, max) =>
     return Math.trunc(numberValue);
   }, z.number().int().min(min).max(max).nullable());
 
+const nullablePositiveInteger = z.preprocess((value) => {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return value;
+  return Math.trunc(numberValue);
+}, z.number().int().positive().nullable());
+
 const certificatesListSchema = z.object({
   body: z.object({}).optional(),
   params: z.object({}).optional(),
@@ -62,12 +73,81 @@ const certificateCreateSchema = z.object({
     city: nullableString(120).optional(),
     organization: nullableString(180).optional(),
     campus_id: z.coerce.number().int().positive().nullable().optional(),
+    student_id: nullablePositiveInteger.optional(),
+    enrollment_id: nullablePositiveInteger.optional(),
   }),
   params: z.object({}).optional(),
   query: z.object({}).optional(),
 });
 
 router.use(authenticate);
+
+const loadCertificateValidationEnrollments = async ({ studentId = null, enrollmentId = null, campusScopeId = null } = {}) => {
+  if (!studentId && !enrollmentId) {
+    return [];
+  }
+
+  const filters = [];
+  const params = [];
+
+  if (enrollmentId) {
+    params.push(enrollmentId);
+    filters.push(`e.id = $${params.length}`);
+  }
+
+  if (studentId) {
+    params.push(studentId);
+    filters.push(`e.student_id = $${params.length}`);
+  }
+
+  if (campusScopeId) {
+    params.push(campusScopeId);
+    filters.push(`cc.campus_id = $${params.length}`);
+  }
+
+  if (!filters.length) {
+    return [];
+  }
+
+  const { rows } = await query(
+    `SELECT
+       e.id,
+       e.student_id,
+       e.status,
+       e.enrollment_date,
+       e.updated_at,
+       p.id AS period_id,
+       p.name AS period_name,
+       p.start_date AS period_start_date,
+       p.end_date AS period_end_date,
+       p.start_date AS course_start_date,
+       p.end_date AS course_end_date,
+       c.id AS course_id,
+       c.name AS course_name,
+       c.duration_hours,
+       cc.campus_id,
+       cp.name AS campus_name,
+       cp.city AS campus_city,
+       cc.modality,
+       s.first_name,
+       s.last_name,
+       s.document_number
+     FROM enrollments e
+     JOIN students s ON s.id = e.student_id
+     JOIN academic_periods p ON p.id = e.period_id
+     JOIN course_campus cc ON cc.id = e.course_campus_id
+     JOIN courses c ON c.id = cc.course_id
+     JOIN campuses cp ON cp.id = cc.campus_id
+     WHERE ${filters.join(' AND ')}
+     ORDER BY
+       COALESCE(p.end_date, e.enrollment_date) DESC,
+       e.updated_at DESC,
+       e.id DESC`,
+    params,
+  );
+
+  return rows.map((row) => decorateEnrollmentWithCertificateEligibility(row));
+};
 
 router.get(
   '/library',
@@ -148,8 +228,52 @@ router.post(
   asyncHandler(async (req, res) => {
     const payload = req.validated.body;
     const campusScopeId = parseCampusScopeId(req);
+    const isAdminProfile = Array.isArray(req.user?.roles) && req.user.roles.includes('ADMIN');
+    const requestedStudentId = payload.student_id ?? null;
+    const requestedEnrollmentId = payload.enrollment_id ?? null;
+    const validationEnrollments = await loadCertificateValidationEnrollments({
+      studentId: requestedStudentId,
+      enrollmentId: requestedEnrollmentId,
+      campusScopeId,
+    });
 
-    let campusId = payload.campus_id ?? req.user.base_campus_id ?? null;
+    if (requestedEnrollmentId && validationEnrollments.length === 0) {
+      throw new ApiError(
+        404,
+        campusScopeId
+          ? 'La matrícula seleccionada no existe o no está disponible en tu sede activa.'
+          : 'La matrícula seleccionada no existe.',
+      );
+    }
+
+    if (!requestedStudentId && !requestedEnrollmentId && !isAdminProfile) {
+      throw new ApiError(
+        403,
+        'Selecciona un alumno apto antes de generar el certificado. Solo un administrador puede emitir certificados sin una matrícula validada.',
+      );
+    }
+
+    const selectedEnrollment = requestedEnrollmentId
+      ? validationEnrollments[0] || null
+      : pickPreferredCertificateEnrollment(validationEnrollments, { allowIneligible: true });
+
+    if (selectedEnrollment && !selectedEnrollment.certificate_eligible && !isAdminProfile) {
+      throw new ApiError(
+        403,
+        `${selectedEnrollment.certificate_eligibility_reason} Solo un administrador puede emitir certificados antes de que el curso esté apto.`,
+      );
+    }
+
+    if (!selectedEnrollment && requestedStudentId && !isAdminProfile) {
+      throw new ApiError(
+        403,
+        campusScopeId
+          ? 'El alumno no tiene una matrícula apta para emitir certificado en la sede activa.'
+          : 'El alumno no tiene una matrícula apta para emitir certificado.',
+      );
+    }
+
+    let campusId = selectedEnrollment?.campus_id ?? payload.campus_id ?? req.user.base_campus_id ?? null;
     if (campusScopeId && !campusId) {
       campusId = campusScopeId;
     }
@@ -187,13 +311,13 @@ router.post(
         payload.certificate_code || null,
         payload.student_name.trim(),
         payload.student_document || null,
-        payload.course_name || null,
-        payload.hours_academic ?? null,
-        payload.modality || null,
-        payload.start_date || null,
-        payload.end_date || null,
+        payload.course_name || selectedEnrollment?.course_name || null,
+        payload.hours_academic ?? selectedEnrollment?.duration_hours ?? null,
+        payload.modality || selectedEnrollment?.modality || null,
+        payload.start_date || selectedEnrollment?.course_start_date || null,
+        payload.end_date || selectedEnrollment?.course_end_date || null,
         payload.issue_date || null,
-        payload.city || null,
+        payload.city || selectedEnrollment?.campus_city || null,
         payload.organization || null,
         campusId,
         req.user.id,

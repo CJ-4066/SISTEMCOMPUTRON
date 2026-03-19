@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, BookOpenText, Building2, CalendarRange, Clock3, FileQuestion, UsersRound } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
-import TeacherPracticesPanel from '../components/TeacherPracticesPanel';
 import CourseResourcesPanel from '../components/CourseResourcesPanel';
 
 const STATUS_OPTIONS = [
@@ -26,6 +26,37 @@ const emptyTopicForm = {
 };
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const workspaceSummaryCards = (assignment) => [
+  {
+    key: 'campus',
+    label: 'Sede / modalidad',
+    value: assignment?.campus_name || 'Sin sede',
+    helper: assignment?.modality || 'PRESENCIAL',
+    icon: Building2,
+  },
+  {
+    key: 'schedule',
+    label: 'Salon / horario',
+    value: assignment?.classroom_info || 'Sin detalle registrado',
+    helper: 'Gestion operativa del salon',
+    icon: Clock3,
+  },
+  {
+    key: 'period',
+    label: 'Periodo',
+    value: assignment?.period_name || 'Sin periodo',
+    helper: 'Contexto academico vigente',
+    icon: CalendarRange,
+  },
+  {
+    key: 'students',
+    label: 'Alumnos activos',
+    value: String(assignment?.active_students ?? 0),
+    helper: 'Matriculas activas en este salon',
+    icon: UsersRound,
+  },
+];
 
 const formatDateTime = (value) => {
   if (!value) return '-';
@@ -122,6 +153,7 @@ export default function TeacherCourseWorkspacePage() {
   const canViewAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW);
   const canManageAttendance = hasPermission(PERMISSIONS.ACADEMIC_ATTENDANCE_MANAGE);
   const canManageAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_MANAGE);
+  const canCreateExam = canViewAssignments;
 
   const loadAssignment = useCallback(async () => {
     if (!canViewAssignments) {
@@ -520,43 +552,72 @@ export default function TeacherCourseWorkspacePage() {
 
   return (
     <section className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-primary-900">Salon del curso</h1>
-          <p className="text-sm text-primary-700">
-            Asistencia, aula virtual, practicas y foro del salon en una sola vista de trabajo.
-          </p>
-        </div>
-        <Link
-          to="/courses"
-          className="rounded-xl border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-800 hover:bg-primary-50"
-        >
-          Volver a cursos
-        </Link>
-      </div>
-
       {message ? <p className="rounded-xl bg-primary-50 p-3 text-sm text-primary-800">{message}</p> : null}
       {error ? <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
       {loadingAssignment ? <p className="text-sm text-primary-700">Cargando salon...</p> : null}
 
       {assignment ? (
-        <article className="card">
-          <h2 className="text-lg font-semibold text-primary-900">{assignment.course_name}</h2>
-          <div className="mt-2 grid gap-2 text-sm text-primary-700 md:grid-cols-2">
-            <p>
-              <strong className="text-primary-900">Sede/Modalidad:</strong> {assignment.campus_name} (
-              {assignment.modality || 'PRESENCIAL'})
-            </p>
-            <p>
-              <strong className="text-primary-900">Salon/Horario:</strong>{' '}
-              {assignment.classroom_info || 'Sin detalle registrado'}
-            </p>
-            <p>
-              <strong className="text-primary-900">Periodo:</strong> {assignment.period_name}
-            </p>
-            <p>
-              <strong className="text-primary-900">Alumnos activos:</strong> {assignment.active_students}
-            </p>
+        <article className="card overflow-hidden p-0">
+          <div className="bg-gradient-to-r from-primary-950 via-primary-900 to-primary-800 px-5 py-6 text-white md:px-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-3">
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary-100">
+                  <BookOpenText className="h-3.5 w-3.5" />
+                  <span>Salon</span>
+                </div>
+                <div>
+                  <h1 className="text-3xl font-semibold tracking-tight text-white md:text-4xl">
+                    {assignment.course_name}
+                  </h1>
+                  <p className="mt-2 max-w-3xl text-sm text-primary-100 md:text-base">
+                    Gestiona la asistencia, los recursos del aula virtual, el foro y la creación de exámenes desde este salón.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {canCreateExam ? (
+                  <Link
+                    to={`/courses/salon/${assignment.assignment_id}/examen/nuevo`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-accent-500/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent-500"
+                  >
+                    <FileQuestion className="h-4 w-4" />
+                    <span>Crear examen</span>
+                  </Link>
+                ) : null}
+                <Link
+                  to="/courses"
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>Volver a cursos</span>
+                </Link>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {workspaceSummaryCards(assignment).map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.key} className="rounded-2xl border border-white/10 bg-white/8 p-4 backdrop-blur-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-200">
+                          {item.label}
+                        </p>
+                        <p className="mt-2 text-lg font-semibold text-white">{item.value}</p>
+                        <p className="mt-1 text-xs text-primary-200">{item.helper}</p>
+                      </div>
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/12 text-white">
+                        <Icon className="h-5 w-5" />
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </article>
       ) : null}
@@ -571,8 +632,6 @@ export default function TeacherCourseWorkspacePage() {
           emptyMessage="Aun no hay archivos cargados en este salon."
         />
       ) : null}
-
-      {assignment ? <TeacherPracticesPanel assignment={assignment} /> : null}
 
       {assignment ? (
         <article className="card order-2 overflow-x-auto">

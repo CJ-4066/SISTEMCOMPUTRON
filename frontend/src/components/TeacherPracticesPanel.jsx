@@ -248,9 +248,22 @@ export default function TeacherPracticesPanel({ assignment }) {
     }
   }, [location.search]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const requestedPracticeId = Number(params.get('practiceId') || 0);
+    const builderSaved = params.get('builderSaved') === '1';
+
+    if (requestedPracticeId > 0) {
+      setSelectedPracticeId(requestedPracticeId);
+    }
+    if (builderSaved) {
+      setMessage('Examen creado correctamente y vinculado al salón.');
+    }
+  }, [location.search]);
+
   const openCreateInNewTab = () => {
     if (!assignmentId || typeof window === 'undefined') return;
-    const route = `/courses/salon/${assignmentId}?newPractice=1`;
+    const route = `/courses/salon/${assignmentId}/examen/nuevo`;
     window.open(route, '_blank', 'noopener,noreferrer');
   };
 
@@ -438,7 +451,7 @@ export default function TeacherPracticesPanel({ assignment }) {
     <article id="teacher-practices-panel" className="card space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-lg font-semibold text-primary-900">Practicas evaluadas</h2>
+          <h2 className="text-lg font-semibold text-primary-900">Exámenes y prácticas</h2>
           <p className="text-xs text-primary-700">
             Crea preguntas y respuestas, programa disponibilidad por fecha/hora y revisa resultados automaticos.
           </p>
@@ -449,7 +462,7 @@ export default function TeacherPracticesPanel({ assignment }) {
             onClick={openCreateInNewTab}
             className="rounded-xl bg-primary-700 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-800"
           >
-            Nueva practica en pestaña
+            Crear examen en pestaña
           </button>
           <button
             type="button"

@@ -19,6 +19,22 @@ const nullableText = (max = 3000) =>
     .optional();
 
 const nullableDateTime = z.string().trim().max(60).nullable().optional();
+const questionOptionSchema = z.object({
+  text: z.string().trim().min(1).max(500),
+  is_correct: z.boolean(),
+});
+const practiceQuestionSchema = z
+  .object({
+    prompt: z.string().trim().min(3).max(3000),
+    points: z.number().min(0.1).max(100).optional().default(1),
+    image_name: z.string().trim().max(180).nullable().optional(),
+    image_url: attachmentUrlSchema.nullable().optional(),
+    options: z.array(questionOptionSchema).min(4).max(5),
+  })
+  .refine((payload) => payload.options.filter((option) => option.is_correct).length === 1, {
+    message: 'Debes marcar exactamente una opción correcta.',
+    path: ['options'],
+  });
 
 const practiceListSchema = z.object({
   body: z.object({}).optional(),
@@ -37,6 +53,7 @@ const practiceCreateSchema = z.object({
     ends_at: nullableDateTime,
     is_enabled: z.boolean().optional().default(false),
     max_attempts: z.number().int().min(1).max(20).optional().default(1),
+    questions: z.array(practiceQuestionSchema).max(300).optional().default([]),
   }),
   params: z.object({}).optional(),
   query: z.object({}).optional(),
@@ -85,26 +102,7 @@ const practiceResultsSchema = z.object({
 });
 
 const questionCreateSchema = z.object({
-  body: z
-    .object({
-      prompt: z.string().trim().min(3).max(3000),
-      points: z.number().min(0.1).max(100).optional().default(1),
-      image_name: z.string().trim().max(180).nullable().optional(),
-      image_url: attachmentUrlSchema.nullable().optional(),
-      options: z
-        .array(
-          z.object({
-            text: z.string().trim().min(1).max(500),
-            is_correct: z.boolean(),
-          }),
-        )
-        .min(4)
-        .max(5),
-    })
-    .refine((payload) => payload.options.filter((option) => option.is_correct).length === 1, {
-      message: 'Debes marcar exactamente una opción correcta.',
-      path: ['options'],
-    }),
+  body: practiceQuestionSchema,
   params: z.object({ practiceId: z.coerce.number().int().positive() }),
   query: z.object({}).optional(),
 });
@@ -283,6 +281,66 @@ const authorizePracticeAccess = asyncHandler(async (req, _res, next) => {
 });
 
 const canManageAssignments = (req) => Boolean(req.practiceAccessContext?.allowAll);
+
+const createPracticeQuestionWithOptions = async (tx, { practiceId, prompt, points = 1, image_name = null, image_url = null, options = [] } = {}) => {
+  const orderResult = await tx.query(
+    `SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order
+     FROM course_practice_questions
+     WHERE practice_id = $1`,
+    [practiceId],
+  );
+  const nextOrder = Number(orderResult.rows[0]?.next_order || 1);
+
+  const questionResult = await tx.query(
+    `INSERT INTO course_practice_questions (
+       practice_id,
+       prompt,
+       points,
+       image_name,
+       image_url,
+       sort_order,
+       is_active
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+     RETURNING
+       id,
+       practice_id,
+       prompt,
+       points,
+       image_name,
+       image_url,
+       sort_order,
+       is_active,
+       created_at,
+       updated_at`,
+    [
+      practiceId,
+      prompt.trim(),
+      Number(points),
+      normalizeOptionalText(image_name),
+      normalizeOptionalText(image_url),
+      nextOrder,
+    ],
+  );
+  const question = questionResult.rows[0];
+
+  const createdOptions = [];
+  for (let index = 0; index < options.length; index += 1) {
+    const option = options[index];
+    const optionResult = await tx.query(
+      `INSERT INTO course_practice_options (question_id, option_text, is_correct, sort_order)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, question_id, option_text, is_correct, sort_order`,
+      [question.id, option.text.trim(), Boolean(option.is_correct), index + 1],
+    );
+    createdOptions.push(optionResult.rows[0]);
+  }
+
+  return {
+    ...question,
+    options: createdOptions,
+  };
+};
 
 const getAssignmentForAccess = async ({ assignmentId, userId, allowAll, studentId }) => {
   const { rows } = await query(
@@ -562,6 +620,7 @@ router.post(
       ends_at = null,
       is_enabled = false,
       max_attempts = 1,
+      questions = [],
     } = req.validated.body;
 
     const assignment = await getAssignmentForAccess({
@@ -579,49 +638,65 @@ router.post(
     const endsAt = parseNullableTimestamp(ends_at, 'ends_at');
     ensureDateRange({ startsAt, endsAt });
 
-    const { rows } = await query(
-      `INSERT INTO course_practices (
-         assignment_id,
-         course_campus_id,
-         period_id,
-         title,
-         description,
-         starts_at,
-         ends_at,
-         is_enabled,
-         max_attempts,
-         created_by
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING
-         id,
-         assignment_id,
-         course_campus_id,
-         period_id,
-         title,
-         description,
-         starts_at,
-         ends_at,
-         is_enabled,
-         max_attempts,
-         created_by,
-         created_at,
-         updated_at`,
-      [
-        assignment.id,
-        assignment.course_campus_id,
-        assignment.period_id,
-        title.trim(),
-        normalizeOptionalText(description),
-        startsAt,
-        endsAt,
-        Boolean(is_enabled),
-        Number(max_attempts),
-        req.user.id,
-      ],
-    );
+    const created = await withTransaction(async (tx) => {
+      const practiceResult = await tx.query(
+        `INSERT INTO course_practices (
+           assignment_id,
+           course_campus_id,
+           period_id,
+           title,
+           description,
+           starts_at,
+           ends_at,
+           is_enabled,
+           max_attempts,
+           created_by
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING
+           id,
+           assignment_id,
+           course_campus_id,
+           period_id,
+           title,
+           description,
+           starts_at,
+           ends_at,
+           is_enabled,
+           max_attempts,
+           created_by,
+           created_at,
+           updated_at`,
+        [
+          assignment.id,
+          assignment.course_campus_id,
+          assignment.period_id,
+          title.trim(),
+          normalizeOptionalText(description),
+          startsAt,
+          endsAt,
+          Boolean(is_enabled),
+          Number(max_attempts),
+          req.user.id,
+        ],
+      );
 
-    return res.status(201).json({ message: 'Práctica creada.', item: mapPracticeAvailability(rows[0]) });
+      const practice = practiceResult.rows[0];
+      for (const question of questions) {
+        await createPracticeQuestionWithOptions(tx, {
+          practiceId: practice.id,
+          prompt: question.prompt,
+          points: question.points,
+          image_name: question.image_name,
+          image_url: question.image_url,
+          options: question.options,
+        });
+      }
+
+      return practice;
+    });
+
+    return res.status(201).json({ message: 'Práctica creada.', item: mapPracticeAvailability(created) });
   }),
 );
 
@@ -766,65 +841,16 @@ router.post(
       throw new ApiError(403, 'No puedes crear preguntas en esta práctica.');
     }
 
-    const item = await withTransaction(async (tx) => {
-      const orderResult = await tx.query(
-        `SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order
-         FROM course_practice_questions
-         WHERE practice_id = $1`,
-        [practiceId],
-      );
-      const nextOrder = Number(orderResult.rows[0]?.next_order || 1);
-
-      const questionResult = await tx.query(
-        `INSERT INTO course_practice_questions (
-           practice_id,
-           prompt,
-           points,
-           image_name,
-           image_url,
-           sort_order,
-           is_active
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, TRUE)
-         RETURNING
-           id,
-           practice_id,
-           prompt,
-           points,
-           image_name,
-           image_url,
-           sort_order,
-           is_active,
-           created_at,
-           updated_at`,
-        [
-          practiceId,
-          prompt.trim(),
-          Number(points),
-          normalizeOptionalText(image_name),
-          normalizeOptionalText(image_url),
-          nextOrder,
-        ],
-      );
-      const question = questionResult.rows[0];
-
-      const createdOptions = [];
-      for (let index = 0; index < options.length; index += 1) {
-        const option = options[index];
-        const optionResult = await tx.query(
-          `INSERT INTO course_practice_options (question_id, option_text, is_correct, sort_order)
-           VALUES ($1, $2, $3, $4)
-           RETURNING id, question_id, option_text, is_correct, sort_order`,
-          [question.id, option.text.trim(), Boolean(option.is_correct), index + 1],
-        );
-        createdOptions.push(optionResult.rows[0]);
-      }
-
-      return {
-        ...question,
-        options: createdOptions,
-      };
-    });
+    const item = await withTransaction((tx) =>
+      createPracticeQuestionWithOptions(tx, {
+        practiceId,
+        prompt,
+        points,
+        image_name,
+        image_url,
+        options,
+      }),
+    );
 
     return res.status(201).json({ message: 'Pregunta creada.', item });
   }),

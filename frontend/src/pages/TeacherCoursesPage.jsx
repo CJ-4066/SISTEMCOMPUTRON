@@ -76,6 +76,7 @@ export default function TeacherCoursesPage() {
   const [attendanceError, setAttendanceError] = useState('');
   const [attendanceSearchOpen, setAttendanceSearchOpen] = useState(false);
   const [attendanceStudentSearch, setAttendanceStudentSearch] = useState('');
+  const [attendanceListEnabled, setAttendanceListEnabled] = useState(false);
 
   const canViewAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW);
   const canManageAttendance = hasPermission(PERMISSIONS.ACADEMIC_ATTENDANCE_MANAGE);
@@ -340,7 +341,7 @@ export default function TeacherCoursesPage() {
   }, []);
 
   useEffect(() => {
-    if (!canUseAttendanceTab || activeTab !== 'attendance') return;
+    if (!canUseAttendanceTab || activeTab !== 'attendance' || !attendanceListEnabled) return;
     if (!selectedAttendanceAssignmentId) {
       setAttendanceStudents([]);
       setAttendanceStatusByEnrollment({});
@@ -351,10 +352,36 @@ export default function TeacherCoursesPage() {
   }, [
     activeTab,
     attendanceDate,
+    attendanceListEnabled,
     canUseAttendanceTab,
     loadAttendanceStudents,
     selectedAttendanceAssignmentId,
   ]);
+
+  const resetAttendanceListState = useCallback(() => {
+    setAttendanceListEnabled(false);
+    setAttendanceStudents([]);
+    setAttendanceStatusByEnrollment({});
+    setAttendanceStudentSearch('');
+    setAttendanceSearchOpen(false);
+  }, []);
+
+  const handleStartAttendanceList = () => {
+    if (!selectedAttendanceAssignmentId) {
+      setAttendanceError('Selecciona un salón antes de tomar lista.');
+      return;
+    }
+
+    if (canManageAssignments && !attendanceCampusFilter) {
+      setAttendanceError('Selecciona sede y salón antes de tomar lista.');
+      return;
+    }
+
+    setAttendanceMessage('');
+    setAttendanceError('');
+    setAttendanceListEnabled(true);
+    scrollToAttendanceList();
+  };
 
   const handleAttendanceStatusChange = (enrollmentId, status) => {
     setAttendanceStatusByEnrollment((prev) => ({
@@ -656,6 +683,7 @@ export default function TeacherCoursesPage() {
                       setSelectedAttendanceAssignmentId('');
                       setAttendanceMessage('');
                       setAttendanceError('');
+                      resetAttendanceListState();
                     }}
                   >
                     <option value="">Seleccionar sede</option>
@@ -677,6 +705,7 @@ export default function TeacherCoursesPage() {
                     setSelectedAttendanceAssignmentId(event.target.value);
                     setAttendanceMessage('');
                     setAttendanceError('');
+                    resetAttendanceListState();
                   }}
                 >
                   {!attendanceAssignmentOptions.length ? <option value="">Sin salones disponibles</option> : null}
@@ -698,6 +727,7 @@ export default function TeacherCoursesPage() {
                     setAttendanceDate(event.target.value);
                     setAttendanceMessage('');
                     setAttendanceError('');
+                    resetAttendanceListState();
                   }}
                 />
               </label>
@@ -711,13 +741,13 @@ export default function TeacherCoursesPage() {
                 <div>
                   <h3 className="text-base font-semibold text-primary-900">Detalle del salón seleccionado</h3>
                   <p className="text-xs text-primary-700">
-                    Al seleccionar el salon, la lista queda habilitada debajo para registrar asistencia.
+                    Pulsa Tomar lista para habilitar la lista de alumnos y registrar la asistencia de esta fecha.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={scrollToAttendanceList}
+                    onClick={handleStartAttendanceList}
                     className="rounded-lg border border-primary-300 bg-white px-3 py-2 text-xs font-semibold text-primary-800 hover:bg-primary-50"
                   >
                     Tomar lista
@@ -768,90 +798,105 @@ export default function TeacherCoursesPage() {
             </article>
           ) : null}
 
-          <article id="attendance-list-card" className="card overflow-x-auto">
+          <article
+            id="attendance-list-card"
+            className={`card overflow-x-auto ${attendanceListEnabled ? '' : 'border border-dashed border-primary-200'}`}
+          >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-base font-semibold text-primary-900">Lista de alumnos</h3>
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  {attendanceSearchOpen ? (
-                    <div className="absolute right-0 top-0 z-10 flex items-center gap-1 rounded-full border border-primary-200 bg-white px-2 py-1 shadow-soft">
-                      <SearchIcon className="h-4 w-4 text-primary-600" />
-                      <input
-                        className="w-36 bg-transparent text-xs text-primary-800 outline-none"
-                        value={attendanceStudentSearch}
-                        onChange={(event) => setAttendanceStudentSearch(event.target.value)}
-                        placeholder="Buscar alumno"
-                        autoFocus
-                      />
+              {attendanceListEnabled ? (
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    {attendanceSearchOpen ? (
+                      <div className="absolute right-0 top-0 z-10 flex items-center gap-1 rounded-full border border-primary-200 bg-white px-2 py-1 shadow-soft">
+                        <SearchIcon className="h-4 w-4 text-primary-600" />
+                        <input
+                          className="w-36 bg-transparent text-xs text-primary-800 outline-none"
+                          value={attendanceStudentSearch}
+                          onChange={(event) => setAttendanceStudentSearch(event.target.value)}
+                          placeholder="Buscar alumno"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAttendanceStudentSearch('');
+                            setAttendanceSearchOpen(false);
+                          }}
+                          className="rounded-full p-1 text-primary-600 hover:bg-primary-100"
+                          aria-label="Cerrar buscador"
+                        >
+                          <CloseIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
                       <button
                         type="button"
-                        onClick={() => {
-                          setAttendanceStudentSearch('');
-                          setAttendanceSearchOpen(false);
-                        }}
-                        className="rounded-full p-1 text-primary-600 hover:bg-primary-100"
-                        aria-label="Cerrar buscador"
+                        onClick={() => setAttendanceSearchOpen(true)}
+                        className="rounded-full border border-primary-200 bg-white p-2 text-primary-700 hover:bg-primary-50"
+                        aria-label="Buscar alumno"
+                        title="Buscar alumno"
                       >
-                        <CloseIcon className="h-3.5 w-3.5" />
+                        <SearchIcon />
                       </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setAttendanceSearchOpen(true)}
-                      className="rounded-full border border-primary-200 bg-white p-2 text-primary-700 hover:bg-primary-50"
-                      aria-label="Buscar alumno"
-                      title="Buscar alumno"
-                    >
-                      <SearchIcon />
-                    </button>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => applyAttendanceStatusToVisible('PRESENTE')}
-                  disabled={!canManageAttendance || savingAttendance || loadingAttendanceStudents || !attendanceStudents.length}
-                  className="rounded-lg border border-primary-300 bg-white px-3 py-2 text-xs font-semibold text-primary-800 hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Visibles: Asistió
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyAttendanceStatusToVisible('AUSENTE')}
-                  disabled={!canManageAttendance || savingAttendance || loadingAttendanceStudents || !attendanceStudents.length}
-                  className="rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Visibles: Ausente
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyAttendanceStatusToVisible('JUSTIFICADO')}
-                  disabled={!canManageAttendance || savingAttendance || loadingAttendanceStudents || !attendanceStudents.length}
-                  className="rounded-lg border border-accent-300 bg-white px-3 py-2 text-xs font-semibold text-accent-800 hover:bg-accent-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Visibles: Justificado
-                </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => applyAttendanceStatusToVisible('PRESENTE')}
+                    disabled={!canManageAttendance || savingAttendance || loadingAttendanceStudents || !attendanceStudents.length}
+                    className="rounded-lg border border-primary-300 bg-white px-3 py-2 text-xs font-semibold text-primary-800 hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Visibles: Asistió
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyAttendanceStatusToVisible('AUSENTE')}
+                    disabled={!canManageAttendance || savingAttendance || loadingAttendanceStudents || !attendanceStudents.length}
+                    className="rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Visibles: Ausente
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyAttendanceStatusToVisible('JUSTIFICADO')}
+                    disabled={!canManageAttendance || savingAttendance || loadingAttendanceStudents || !attendanceStudents.length}
+                    className="rounded-lg border border-accent-300 bg-white px-3 py-2 text-xs font-semibold text-accent-800 hover:bg-accent-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Visibles: Justificado
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={saveAttendance}
-                  disabled={
-                    !selectedAttendanceAssignmentId ||
-                    (canManageAssignments && !attendanceCampusFilter) ||
-                    !attendanceStudents.length ||
-                    loadingAttendanceStudents ||
-                    savingAttendance
-                  }
-                  className="rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingAttendance ? 'Guardando...' : 'Guardar cambios'}
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={saveAttendance}
+                    disabled={
+                      !selectedAttendanceAssignmentId ||
+                      (canManageAssignments && !attendanceCampusFilter) ||
+                      !attendanceStudents.length ||
+                      loadingAttendanceStudents ||
+                      savingAttendance
+                    }
+                    className="rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {savingAttendance ? 'Guardando...' : 'Guardar cambios'}
+                  </button>
+                </div>
+              ) : (
+                <span className="rounded-full bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-800">
+                  Bloqueada hasta seleccionar Tomar lista
+                </span>
+              )}
             </div>
+
+            {!attendanceListEnabled ? (
+              <p className="mt-3 text-sm text-primary-700">
+                Selecciona el salón y la fecha, luego pulsa <strong>Tomar lista</strong> para habilitar esta sección.
+              </p>
+            ) : null}
 
             {loadingAttendanceStudents ? <p className="mt-2 text-sm text-primary-700">Cargando alumnos...</p> : null}
 
-            {!loadingAttendanceStudents && attendanceStudents.length ? (
+            {attendanceListEnabled && !loadingAttendanceStudents && attendanceStudents.length ? (
               <>
                 <div className="mt-3 mb-4 flex flex-wrap gap-2">
                   {Object.entries(attendanceSummary).map(([status, count]) => (
@@ -921,7 +966,7 @@ export default function TeacherCoursesPage() {
               </>
             ) : null}
 
-            {!loadingAttendanceStudents && !attendanceStudents.length ? (
+            {attendanceListEnabled && !loadingAttendanceStudents && !attendanceStudents.length ? (
               <p className="mt-3 text-sm text-primary-700">
                 Selecciona sede y salón para visualizar la asistencia.
               </p>

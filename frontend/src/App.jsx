@@ -13,6 +13,7 @@ const CoursesPage = lazy(() => import('./pages/CoursesPage'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage'));
 const TeachersPage = lazy(() => import('./pages/TeachersPage'));
 const CourseWorkspacePage = lazy(() => import('./pages/CourseWorkspacePage'));
+const ExamBuilderPage = lazy(() => import('./pages/ExamBuilderPage'));
 const PaymentsPage = lazy(() => import('./pages/PaymentsPage'));
 const CertificateLibraryPage = lazy(() => import('./pages/CertificateLibraryPage'));
 const CertificatesPage = lazy(() => import('./pages/CertificatesPage'));
@@ -87,6 +88,14 @@ export default function App() {
                 element={
                   <Suspense fallback={routeFallback}>
                     <CoursesPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/courses/salon/:assignmentId/examen/nuevo"
+                element={
+                  <Suspense fallback={routeFallback}>
+                    <ExamBuilderPage />
                   </Suspense>
                 }
               />

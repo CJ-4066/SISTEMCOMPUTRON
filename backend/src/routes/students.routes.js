@@ -8,11 +8,26 @@ const validate = require('../middlewares/validate');
 const { authenticate, authorizePermission } = require('../middlewares/auth');
 const { userHasPermission, invalidateUserPermissionCache } = require('../services/permissions.service');
 const { parseCampusScopeId } = require('../utils/campusScope');
+const {
+  decorateEnrollmentWithCertificateEligibility,
+  getCertificateEligibility,
+  pickPreferredCertificateEnrollment,
+} = require('../utils/certificateEligibility');
 const { normalizeDocumentNumber } = require('../utils/documentNumber');
 
 const router = express.Router();
 const STUDENT_ROLE_NAME = 'ALUMNO';
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida (YYYY-MM-DD)');
+const booleanQuery = z.preprocess((value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'si', 'yes'].includes(normalized)) return true;
+  if (['0', 'false', 'no'].includes(normalized)) return false;
+
+  return value;
+}, z.boolean().optional());
 const enrollmentPayloadSchema = z.object({
   course_campus_id: z.number().int().positive(),
   period_id: z.number().int().positive(),
@@ -61,6 +76,7 @@ const studentListSchema = z.object({
     .object({
       q: z.string().trim().max(120).optional(),
       campus_id: z.coerce.number().int().positive().optional(),
+      certificate_ready_only: booleanQuery,
       page: z.coerce.number().int().positive().optional(),
       page_size: z.coerce.number().int().min(1).max(100).optional(),
     })
@@ -254,6 +270,19 @@ const getCurrentStudentProfile = async (req) => {
   return profile;
 };
 
+const decorateStudentCertificateSnapshot = (student = {}) => {
+  const certificateEnrollment =
+    student?.certificate_enrollment && typeof student.certificate_enrollment === 'object'
+      ? student.certificate_enrollment
+      : null;
+
+  return {
+    ...student,
+    ...getCertificateEligibility(certificateEnrollment || {}),
+    certificate_enrollment: certificateEnrollment,
+  };
+};
+
 router.use(authenticate);
 
 router.get(
@@ -264,6 +293,7 @@ router.get(
     const queryParams = req.validated.query || {};
     const search = queryParams.q?.trim() || null;
     const campusScopeId = parseCampusScopeId(req);
+    const certificateReadyOnly = queryParams.certificate_ready_only === true;
     const hasPagination = queryParams.page !== undefined || queryParams.page_size !== undefined;
 
     const pageSize = queryParams.page_size || 20;
@@ -335,6 +365,26 @@ router.get(
             AND e_scope.status <> 'TRANSFERRED'
         )
       )
+      AND (
+        COALESCE($3::boolean, FALSE) = FALSE
+        OR EXISTS (
+          SELECT 1
+          FROM enrollments e_ready
+          JOIN course_campus cc_ready ON cc_ready.id = e_ready.course_campus_id
+          JOIN academic_periods ap_ready ON ap_ready.id = e_ready.period_id
+          WHERE e_ready.student_id = s.id
+            AND e_ready.status <> 'TRANSFERRED'
+            AND ($2::bigint IS NULL OR cc_ready.campus_id = $2)
+            AND (
+              e_ready.status = 'COMPLETED'
+              OR (
+                e_ready.status = 'ACTIVE'
+                AND ap_ready.end_date IS NOT NULL
+                AND ap_ready.end_date <= CURRENT_DATE
+              )
+            )
+        )
+      )
     `;
     const assignedEnrollmentJoin = `
       LEFT JOIN LATERAL (
@@ -361,12 +411,54 @@ router.get(
         LIMIT 1
       ) assigned_enrollment ON TRUE
     `;
+    const certificateEnrollmentJoin = `
+      LEFT JOIN LATERAL (
+        SELECT
+          JSONB_BUILD_OBJECT(
+            'id', e.id,
+            'status', e.status,
+            'course_id', c.id,
+            'course_name', c.name,
+            'duration_hours', c.duration_hours,
+            'campus_id', cp.id,
+            'campus_name', cp.name,
+            'campus_city', cp.city,
+            'period_id', ap.id,
+            'period_name', ap.name,
+            'course_start_date', ap.start_date,
+            'course_end_date', ap.end_date,
+            'modality', cc.modality
+          ) AS certificate_enrollment
+        FROM enrollments e
+        JOIN course_campus cc ON cc.id = e.course_campus_id
+        JOIN courses c ON c.id = cc.course_id
+        JOIN campuses cp ON cp.id = cc.campus_id
+        JOIN academic_periods ap ON ap.id = e.period_id
+        WHERE e.student_id = fs.id
+          AND e.status <> 'TRANSFERRED'
+          AND ($2::bigint IS NULL OR cc.campus_id = $2)
+        ORDER BY
+          CASE
+            WHEN e.status = 'COMPLETED' THEN 0
+            WHEN e.status = 'ACTIVE' AND ap.end_date IS NOT NULL AND ap.end_date <= CURRENT_DATE THEN 1
+            ELSE 2
+          END,
+          COALESCE(ap.end_date, e.enrollment_date) DESC,
+          e.updated_at DESC,
+          e.id DESC
+        LIMIT 1
+      ) certificate_candidate ON TRUE
+    `;
 
     let total = 0;
     let rows = [];
 
     if (hasPagination) {
-      const totalResult = await query(`SELECT COUNT(*)::int AS total ${baseFilter}`, [search, campusScopeId]);
+      const totalResult = await query(`SELECT COUNT(*)::int AS total ${baseFilter}`, [
+        search,
+        campusScopeId,
+        certificateReadyOnly,
+      ]);
       total = totalResult.rows[0]?.total || 0;
 
       const dataResult = await query(
@@ -387,11 +479,11 @@ router.get(
            COALESCE(u_student.is_active, FALSE) AS access_is_active,
            s.created_by,
            CONCAT_WS(' ', u_creator.first_name, u_creator.last_name) AS created_by_name,
-           s.created_at
+         s.created_at
            ${baseFilter}
          ORDER BY s.created_at DESC
-           LIMIT $3
-           OFFSET $4
+           LIMIT $4
+           OFFSET $5
          )
          SELECT
            fs.id,
@@ -416,6 +508,7 @@ router.get(
            COALESCE(assigned_enrollment.assigned_campus_name, fs.assigned_campus_name_fallback) AS assigned_campus_name,
            assigned_enrollment.assigned_period_id,
            assigned_enrollment.assigned_period_name,
+           certificate_candidate.certificate_enrollment,
            COALESCE(
              JSON_AGG(
                JSON_BUILD_OBJECT(
@@ -431,6 +524,7 @@ router.get(
            ) AS guardians
          FROM filtered_students fs
          ${assignedEnrollmentJoin}
+         ${certificateEnrollmentJoin}
          LEFT JOIN student_guardian sg ON sg.student_id = fs.id
          LEFT JOIN guardians g ON g.id = sg.guardian_id
          GROUP BY
@@ -457,12 +551,13 @@ router.get(
            assigned_enrollment.assigned_campus_id,
            assigned_enrollment.assigned_campus_name,
            assigned_enrollment.assigned_period_id,
-           assigned_enrollment.assigned_period_name
+           assigned_enrollment.assigned_period_name,
+           certificate_candidate.certificate_enrollment
          ORDER BY fs.created_at DESC`,
-        [search, campusScopeId, pageSize, offset],
+        [search, campusScopeId, certificateReadyOnly, pageSize, offset],
       );
 
-      rows = dataResult.rows;
+      rows = dataResult.rows.map(decorateStudentCertificateSnapshot);
     } else {
       const dataResult = await query(
         `WITH filtered_students AS (
@@ -509,6 +604,7 @@ router.get(
            COALESCE(assigned_enrollment.assigned_campus_name, fs.assigned_campus_name_fallback) AS assigned_campus_name,
            assigned_enrollment.assigned_period_id,
            assigned_enrollment.assigned_period_name,
+           certificate_candidate.certificate_enrollment,
            COALESCE(
              JSON_AGG(
                JSON_BUILD_OBJECT(
@@ -524,6 +620,7 @@ router.get(
            ) AS guardians
          FROM filtered_students fs
          ${assignedEnrollmentJoin}
+         ${certificateEnrollmentJoin}
          LEFT JOIN student_guardian sg ON sg.student_id = fs.id
          LEFT JOIN guardians g ON g.id = sg.guardian_id
          GROUP BY
@@ -550,12 +647,13 @@ router.get(
            assigned_enrollment.assigned_campus_id,
            assigned_enrollment.assigned_campus_name,
            assigned_enrollment.assigned_period_id,
-           assigned_enrollment.assigned_period_name
+           assigned_enrollment.assigned_period_name,
+           certificate_candidate.certificate_enrollment
          ORDER BY fs.created_at DESC`,
-        [search, campusScopeId],
+        [search, campusScopeId, certificateReadyOnly],
       );
 
-      rows = dataResult.rows;
+      rows = dataResult.rows.map(decorateStudentCertificateSnapshot);
       total = rows.length;
     }
 
@@ -1448,6 +1546,7 @@ router.get(
   ),
   asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
+    const campusScopeId = parseCampusScopeId(req);
 
     const studentResult = await query(
       `SELECT
@@ -1520,11 +1619,21 @@ router.get(
       [id],
     );
 
+    const enrollments = enrollmentResult.rows.map((row) => decorateEnrollmentWithCertificateEligibility(row));
+    const scopedEnrollments = campusScopeId
+      ? enrollments.filter((row) => Number(row.campus_id) === Number(campusScopeId))
+      : enrollments;
+    const preferredCertificateEnrollment = pickPreferredCertificateEnrollment(scopedEnrollments, {
+      allowIneligible: true,
+    });
+
     return res.json({
       item: {
         ...studentResult.rows[0],
         guardians: guardianResult.rows,
-        enrollments: enrollmentResult.rows,
+        enrollments,
+        preferred_certificate_enrollment: preferredCertificateEnrollment,
+        has_certificate_eligible_enrollment: scopedEnrollments.some((row) => row.certificate_eligible),
       },
     });
   }),

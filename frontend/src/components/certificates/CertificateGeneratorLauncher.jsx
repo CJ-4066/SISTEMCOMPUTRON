@@ -14,8 +14,18 @@ const getTodayIsoDate = () => {
   return local.toISOString().slice(0, 10);
 };
 
+const normalizePositiveId = (value) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
 const createCertificateDraftDefaults = () => ({
   campus_id: null,
+  student_id: null,
+  enrollment_id: null,
+  certificate_eligible: null,
+  certificate_override_required: false,
+  certificate_eligibility_reason: '',
   photo_data_url: '',
   photo_file_name: '',
   student_name: 'Nombre del alumno',
@@ -103,25 +113,6 @@ const formatStudentName = (student) =>
     .join(' ')
     .trim();
 
-const parseComparableDate = (value) => {
-  const parsed = Date.parse(value || '');
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const pickPreferredEnrollment = (enrollments = []) =>
-  [...enrollments].sort((left, right) => {
-    const leftRank = left?.status === 'ACTIVE' ? 0 : 1;
-    const rightRank = right?.status === 'ACTIVE' ? 0 : 1;
-    if (leftRank !== rightRank) return leftRank - rightRank;
-
-    const dateDifference =
-      parseComparableDate(right?.period_end_date || right?.enrollment_date) -
-      parseComparableDate(left?.period_end_date || left?.enrollment_date);
-    if (dateDifference !== 0) return dateDifference;
-
-    return Number(right?.id || 0) - Number(left?.id || 0);
-  })[0] || null;
-
 const buildCertificateCode = ({ issueDate, studentId, enrollmentId }) => {
   const year = String(issueDate || getTodayIsoDate()).slice(0, 4) || `${new Date().getFullYear()}`;
   const serialSource = Number(enrollmentId || studentId || 0);
@@ -133,14 +124,59 @@ const resolveCourseStartDate = (enrollment) => enrollment?.course_start_date || 
 
 const resolveCourseEndDate = (enrollment) => enrollment?.course_end_date || enrollment?.period_end_date || '';
 
+const resolvePreferredCertificateEnrollment = (student, detailItem) => {
+  const enrollments = Array.isArray(detailItem?.enrollments) ? detailItem.enrollments : [];
+  const candidateEnrollmentId = normalizePositiveId(student?.certificate_enrollment?.id);
+
+  if (candidateEnrollmentId) {
+    const matchedEnrollment = enrollments.find((item) => normalizePositiveId(item?.id) === candidateEnrollmentId);
+    if (matchedEnrollment) {
+      return matchedEnrollment;
+    }
+  }
+
+  const preferredEnrollmentId = normalizePositiveId(detailItem?.preferred_certificate_enrollment?.id);
+  if (preferredEnrollmentId) {
+    const matchedEnrollment = enrollments.find((item) => normalizePositiveId(item?.id) === preferredEnrollmentId);
+    if (matchedEnrollment) {
+      return matchedEnrollment;
+    }
+  }
+
+  return enrollments.find((item) => item?.certificate_eligible) || detailItem?.preferred_certificate_enrollment || null;
+};
+
+const getCertificateBadge = ({ eligible = false, allowAdminOverride = false } = {}) => {
+  if (eligible) {
+    return {
+      label: 'Apto para certificado',
+      className: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
+    };
+  }
+
+  if (allowAdminOverride) {
+    return {
+      label: 'Solo ADMIN',
+      className: 'border border-amber-200 bg-amber-50 text-amber-700',
+    };
+  }
+
+  return {
+    label: 'No apto',
+    className: 'border border-red-200 bg-red-50 text-red-700',
+  };
+};
+
 export default function CertificateGeneratorLauncher() {
-  const { hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const isAdminProfile = (user?.roles || []).includes('ADMIN');
   const canSearchStudents = hasPermission(PERMISSIONS.STUDENTS_VIEW);
 
   const [draft, setDraft] = useState(createCertificateDraftDefaults);
   const [studentSearch, setStudentSearch] = useState('');
   const [studentResults, setStudentResults] = useState([]);
   const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [showIneligibleStudents, setShowIneligibleStudents] = useState(false);
   const [processingPhoto, setProcessingPhoto] = useState(false);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingStudentDetail, setLoadingStudentDetail] = useState(false);
@@ -148,10 +184,29 @@ export default function CertificateGeneratorLauncher() {
   const [lookupError, setLookupError] = useState('');
   const [lookupMessage, setLookupMessage] = useState('');
 
-  const selectedStudent = useMemo(
-    () => studentResults.find((student) => String(student.id) === String(selectedStudentId)) || null,
-    [selectedStudentId, studentResults],
-  );
+  const hasBoundStudent = normalizePositiveId(draft.student_id) !== null;
+  const isDraftEligible = draft.certificate_eligible === true;
+  const generatorBlockReason = useMemo(() => {
+    if (processingPhoto || loadingStudentDetail) return '';
+    if (isAdminProfile) return '';
+    if (!hasBoundStudent) return 'Selecciona un alumno apto para habilitar el generador.';
+    if (!isDraftEligible) {
+      return draft.certificate_eligibility_reason || 'El alumno seleccionado todavía no está apto para certificado.';
+    }
+    return '';
+  }, [
+    draft.certificate_eligibility_reason,
+    hasBoundStudent,
+    isAdminProfile,
+    isDraftEligible,
+    loadingStudentDetail,
+    processingPhoto,
+  ]);
+
+  const selectedStudentBadge = getCertificateBadge({
+    eligible: isDraftEligible,
+    allowAdminOverride: hasBoundStudent && !isDraftEligible && isAdminProfile,
+  });
 
   const updateDraftField = (field, value) => {
     setDraft((current) => ({
@@ -159,6 +214,18 @@ export default function CertificateGeneratorLauncher() {
       [field]: value,
     }));
   };
+
+  const clearStudentBinding = useCallback(() => {
+    setSelectedStudentId('');
+    setDraft((current) => ({
+      ...current,
+      student_id: null,
+      enrollment_id: null,
+      certificate_eligible: null,
+      certificate_override_required: false,
+      certificate_eligibility_reason: '',
+    }));
+  }, []);
 
   const loadStudentOptions = useCallback(
     async (search = '') => {
@@ -175,6 +242,7 @@ export default function CertificateGeneratorLauncher() {
             q: search || undefined,
             page: 1,
             page_size: STUDENT_LOOKUP_LIMIT,
+            certificate_ready_only: isAdminProfile ? !showIneligibleStudents : true,
           },
         });
         setStudentResults(response.data?.items || []);
@@ -185,7 +253,7 @@ export default function CertificateGeneratorLauncher() {
         setLoadingStudents(false);
       }
     },
-    [canSearchStudents],
+    [canSearchStudents, isAdminProfile, showIneligibleStudents],
   );
 
   useEffect(() => {
@@ -210,16 +278,25 @@ export default function CertificateGeneratorLauncher() {
     try {
       const response = await api.get(`/students/${student.id}`);
       const item = response.data?.item;
-      const preferredEnrollment = pickPreferredEnrollment(item?.enrollments || []);
+      const preferredEnrollment = resolvePreferredCertificateEnrollment(student, item);
       const courseStartDate = resolveCourseStartDate(preferredEnrollment);
       const courseEndDate = resolveCourseEndDate(preferredEnrollment);
       const issueDate = courseEndDate || getTodayIsoDate();
       const studentName = formatStudentName(item) || 'Nombre del alumno';
-      const hasEnrollmentData = Boolean(preferredEnrollment);
+      const eligibilityReason =
+        preferredEnrollment?.certificate_eligibility_reason ||
+        student?.certificate_eligibility_reason ||
+        'No existe una matrícula válida para emitir certificado.';
+      const certificateEligible = preferredEnrollment?.certificate_eligible === true;
 
       setDraft((current) => ({
         ...current,
-        campus_id: preferredEnrollment?.campus_id || item?.assigned_campus_id || null,
+        campus_id: preferredEnrollment?.campus_id || student?.certificate_enrollment?.campus_id || item?.assigned_campus_id || null,
+        student_id: normalizePositiveId(item?.id || student?.id),
+        enrollment_id: normalizePositiveId(preferredEnrollment?.id || student?.certificate_enrollment?.id),
+        certificate_eligible: certificateEligible,
+        certificate_override_required: !certificateEligible,
+        certificate_eligibility_reason: eligibilityReason,
         student_name: studentName,
         student_document: item?.document_number || '',
         certificate_code: buildCertificateCode({
@@ -233,17 +310,28 @@ export default function CertificateGeneratorLauncher() {
         start_date: courseStartDate,
         end_date: courseEndDate,
         issue_date: issueDate,
-        city: preferredEnrollment?.campus_city || item?.assigned_campus_city || current.city || '',
+        city:
+          preferredEnrollment?.campus_city || student?.certificate_enrollment?.campus_city || item?.assigned_campus_city || current.city || '',
         organization: current.organization || 'Instituto Computron',
       }));
 
-      setLookupMessage(
-        hasEnrollmentData
-          ? `Se cargaron los datos de ${studentName}, incluida la fecha de inicio y culminación del curso, desde su matrícula ${
-              preferredEnrollment?.status === 'ACTIVE' ? 'activa' : 'más reciente'
-            }.`
-          : `Se cargaron nombre y documento de ${studentName}. Completa manualmente curso, horas y fechas porque no tiene matrícula disponible.`,
-      );
+      if (preferredEnrollment && certificateEligible) {
+        setLookupMessage(
+          `Se cargaron los datos de ${studentName}. El alumno culminó ${preferredEnrollment.course_name || 'su curso'} y está apto para generar el certificado.`,
+        );
+      } else if (preferredEnrollment) {
+        setLookupMessage(
+          isAdminProfile
+            ? `Se cargaron los datos de ${studentName}. ${eligibilityReason} Como ADMIN puedes emitir el certificado de forma excepcional.`
+            : `Se cargaron los datos de ${studentName}. ${eligibilityReason}`,
+        );
+      } else {
+        setLookupMessage(
+          isAdminProfile
+            ? `Se cargaron nombre y documento de ${studentName}. No se encontró una matrícula válida para certificar; solo ADMIN puede completar y emitir manualmente.`
+            : `Se cargaron nombre y documento de ${studentName}, pero no tiene una matrícula apta para certificar.`,
+        );
+      }
     } catch (requestError) {
       setLookupError(requestError.response?.data?.message || 'No se pudo cargar el detalle del alumno.');
     } finally {
@@ -303,6 +391,21 @@ export default function CertificateGeneratorLauncher() {
     setError('');
 
     try {
+      if (!String(draft.student_name || '').trim()) {
+        throw new Error('Completa el nombre del alumno antes de abrir el generador.');
+      }
+
+      if (!isAdminProfile) {
+        if (!hasBoundStudent) {
+          throw new Error('Selecciona un alumno apto antes de generar el certificado.');
+        }
+        if (!isDraftEligible) {
+          throw new Error(
+            draft.certificate_eligibility_reason || 'El alumno seleccionado todavía no está apto para certificado.',
+          );
+        }
+      }
+
       const draftId = persistDraft();
       const generatorUrl = buildGeneratorUrl(draftId, { autoDownload });
       const openedWindow = window.open('about:blank', '_blank');
@@ -333,30 +436,50 @@ export default function CertificateGeneratorLauncher() {
       {canSearchStudents ? (
         <section className="panel-soft space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-primary-900">Seleccionar alumno</h3>
-              <p className="text-sm text-primary-700">
-                Busca por nombre o documento. Al seleccionar un alumno, el sistema autocompleta el certificado con su
-                matrícula activa o, si no existe, con la más reciente.
-              </p>
-              <p className="mt-1 text-xs text-primary-600">
+            <div className="space-y-1">
+              <div>
+                <h3 className="text-base font-semibold text-primary-900">Seleccionar alumno</h3>
+                <p className="text-sm text-primary-700">
+                  Busca por nombre o documento. El sistema prioriza matrículas culminadas y solo considera apto al
+                  alumno cuyo curso ya terminó.
+                </p>
+              </div>
+              <p className="text-xs text-primary-600">
                 La foto no se autocompleta porque actualmente no se guarda en la ficha del alumno.
               </p>
             </div>
 
-            {selectedStudent ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedStudentId('');
-                  setLookupMessage('');
-                  setLookupError('');
-                }}
-                className="rounded-lg border border-primary-300 bg-white px-3 py-2 text-sm font-semibold text-primary-800 hover:bg-primary-50"
-              >
-                Quitar selección
-              </button>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-3">
+              {isAdminProfile ? (
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm text-primary-800">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-primary-300 text-accent-600 focus:ring-accent-500"
+                    checked={showIneligibleStudents}
+                    onChange={(event) => setShowIneligibleStudents(event.target.checked)}
+                  />
+                  <span>Incluir alumnos no aptos</span>
+                </label>
+              ) : (
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                  Solo se muestran alumnos aptos
+                </p>
+              )}
+
+              {hasBoundStudent ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearStudentBinding();
+                    setLookupMessage('');
+                    setLookupError('');
+                  }}
+                  className="rounded-lg border border-primary-300 bg-white px-3 py-2 text-sm font-semibold text-primary-800 hover:bg-primary-50"
+                >
+                  Quitar selección
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <label className="space-y-1">
@@ -374,7 +497,13 @@ export default function CertificateGeneratorLauncher() {
           {!loadingStudents && studentResults.length > 0 ? (
             <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               {studentResults.map((student) => {
+                const certificateEnrollment = student.certificate_enrollment || null;
                 const isSelected = String(student.id) === String(selectedStudentId);
+                const badge = getCertificateBadge({
+                  eligible: student.certificate_eligible === true,
+                  allowAdminOverride: student.certificate_eligible !== true && isAdminProfile,
+                });
+
                 return (
                   <button
                     key={student.id}
@@ -390,14 +519,25 @@ export default function CertificateGeneratorLauncher() {
                     <p className="font-semibold text-primary-900">{formatStudentName(student) || `Alumno #${student.id}`}</p>
                     <p className="text-xs text-primary-600">{student.document_number || 'Sin documento'}</p>
                     <p className="mt-2 text-xs text-primary-700">
-                      Curso: {student.assigned_course_name || 'Sin curso asignado'}
+                      Curso: {certificateEnrollment?.course_name || student.assigned_course_name || 'Sin curso disponible'}
                     </p>
                     <p className="text-xs text-primary-600">
-                      Sede: {student.assigned_campus_name || 'Sin sede asignada'}
+                      Sede: {certificateEnrollment?.campus_name || student.assigned_campus_name || 'Sin sede asignada'}
                     </p>
-                    <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-accent-700">
-                      {isSelected ? 'Alumno seleccionado' : 'Usar para certificado'}
+                    <p className="text-xs text-primary-600">
+                      Periodo: {certificateEnrollment?.period_name || student.assigned_period_name || 'Sin periodo registrado'}
                     </p>
+                    <p className="mt-2 text-xs text-primary-700">
+                      {student.certificate_eligibility_reason || 'No existe una matrícula válida para certificar.'}
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${badge.className}`}>
+                        {badge.label}
+                      </span>
+                      <span className="text-xs font-semibold uppercase tracking-wide text-accent-700">
+                        {isSelected ? 'Alumno seleccionado' : 'Usar para certificado'}
+                      </span>
+                    </div>
                   </button>
                 );
               })}
@@ -408,16 +548,48 @@ export default function CertificateGeneratorLauncher() {
             <p className="text-sm text-primary-700">
               {studentSearch.trim()
                 ? 'No se encontraron alumnos para ese criterio.'
-                : 'Escribe un nombre o documento para elegir al alumno y precargar el certificado.'}
+                : isAdminProfile && showIneligibleStudents
+                  ? 'Escribe un nombre o documento para elegir un alumno y completar el certificado, incluso si aún no está apto.'
+                  : 'Escribe un nombre o documento para elegir un alumno apto y precargar el certificado.'}
             </p>
           ) : null}
 
           {loadingStudentDetail ? <p className="text-sm text-primary-700">Cargando datos del alumno...</p> : null}
+
+          {hasBoundStudent ? (
+            <div
+              className={`rounded-xl border px-4 py-3 ${
+                isDraftEligible
+                  ? 'border-emerald-200 bg-emerald-50'
+                  : isAdminProfile
+                    ? 'border-amber-200 bg-amber-50'
+                    : 'border-red-200 bg-red-50'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-primary-900">
+                  {isDraftEligible
+                    ? 'Alumno apto para certificado'
+                    : isAdminProfile
+                      ? 'Emisión excepcional disponible solo para ADMIN'
+                      : 'Alumno no apto para certificado'}
+                </p>
+                <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${selectedStudentBadge.className}`}>
+                  {selectedStudentBadge.label}
+                </span>
+              </div>
+              <p className="mt-1 text-sm text-primary-800">
+                {draft.certificate_eligibility_reason || 'No existe una matrícula válida para emitir certificado.'}
+              </p>
+            </div>
+          ) : null}
         </section>
       ) : (
         <section className="panel-soft">
           <p className="text-sm text-primary-700">
-            Tu usuario no puede consultar alumnos desde este módulo. Puedes completar el certificado manualmente.
+            {isAdminProfile
+              ? 'Tu usuario no puede consultar alumnos desde este módulo, pero como ADMIN aún puedes completar el certificado manualmente.'
+              : 'Tu usuario no puede consultar alumnos desde este módulo. Sin una matrícula validada no podrás emitir certificados.'}
           </p>
         </section>
       )}
@@ -526,7 +698,7 @@ export default function CertificateGeneratorLauncher() {
               onChange={(event) => updateDraftField('end_date', event.target.value)}
             />
             <span className="text-xs text-primary-600">
-              Al seleccionar un alumno, esta fecha se llena automáticamente con la culminación del curso.
+              Solo los cursos culminados quedan aptos automáticamente para emitir certificado.
             </span>
           </label>
 
@@ -567,15 +739,20 @@ export default function CertificateGeneratorLauncher() {
           <div className="space-y-2">
             <h3 className="text-base font-semibold text-primary-900">Acciones</h3>
             <p className="text-sm text-primary-700">
-              Configura aquí los datos del certificado. Cuando abras el generador, todo se cargará automáticamente.
+              {isAdminProfile
+                ? 'Puedes emitir certificados aptos normalmente y, si el alumno aún no está apto, continuar como excepción administrativa.'
+                : 'Primero selecciona un alumno apto. El generador se habilita solo cuando el curso ya culminó.'}
             </p>
+            {generatorBlockReason ? (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">{generatorBlockReason}</p>
+            ) : null}
           </div>
 
           <div className="grid gap-2">
             <button
               type="button"
               onClick={() => openGenerator()}
-              disabled={processingPhoto || loadingStudentDetail}
+              disabled={processingPhoto || loadingStudentDetail || Boolean(generatorBlockReason)}
               className="rounded-xl bg-primary-700 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-70"
             >
               Abrir generador
@@ -583,7 +760,7 @@ export default function CertificateGeneratorLauncher() {
             <button
               type="button"
               onClick={() => openGenerator({ autoDownload: true })}
-              disabled={processingPhoto || loadingStudentDetail}
+              disabled={processingPhoto || loadingStudentDetail || Boolean(generatorBlockReason)}
               className="rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
               Descargar PDF

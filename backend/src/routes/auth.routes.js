@@ -33,6 +33,14 @@ const optionalCampusIdSchema = z.preprocess((value) => {
   return Number.isFinite(parsed) ? parsed : value;
 }, z.number().int().positive().nullable().optional());
 
+const teacherAssignmentSchema = z.object({
+  course_campus_id: z.number().int().positive(),
+  period_id: z.number().int().positive(),
+  schedule_info: z.string().max(240).nullable().optional(),
+  campus_override_reason: z.string().max(300).nullable().optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE']).optional().default('ACTIVE'),
+});
+
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -53,6 +61,7 @@ const registerSchema = z.object({
     roles: z.array(z.enum(ROLES)).min(1).max(3).default(['SECRETARIADO']).optional(),
     base_campus_id: optionalCampusIdSchema,
     must_change_password: z.boolean().optional().default(false),
+    teacher_assignment: teacherAssignmentSchema.optional(),
   }),
   params: z.object({}).optional(),
   query: z.object({}).optional(),
@@ -111,6 +120,7 @@ router.post(
       roles = ['SECRETARIADO'],
       base_campus_id = null,
       must_change_password = false,
+      teacher_assignment = null,
     } = req.validated.body;
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedDocumentNumber = normalizeDocumentNumber(document_number);
@@ -126,6 +136,10 @@ router.post(
       if (!normalizedAddress) {
         throw new ApiError(400, 'La dirección del docente es obligatoria.');
       }
+    }
+
+    if (teacher_assignment && !roles.includes('DOCENTE')) {
+      throw new ApiError(400, 'La asignación inicial solo aplica a usuarios con rol DOCENTE.');
     }
 
     const { rows: countRows } = await query('SELECT COUNT(*)::int AS count FROM users');
@@ -148,11 +162,17 @@ router.post(
         throw new ApiError(403, 'No tiene permisos para registrar usuarios.');
       }
       const canManageRoles = await userHasPermission(req.user.id, 'users.roles.manage');
+      const canManageTeacherAssignments = teacher_assignment
+        ? await userHasPermission(req.user.id, 'teachers.assignments.manage')
+        : false;
       const requestedRoles = Array.from(new Set((roles || []).filter(Boolean)));
       const isDefaultRoleRequest =
         requestedRoles.length === 1 && requestedRoles[0] === 'SECRETARIADO';
       if (!canManageRoles && !isDefaultRoleRequest) {
         throw new ApiError(403, 'No tiene permisos para elegir roles personalizados al crear usuarios.');
+      }
+      if (teacher_assignment && !canManageTeacherAssignments) {
+        throw new ApiError(403, 'No tiene permisos para configurar asignaciones docentes al crear usuarios.');
       }
 
       const creatorResult = await query(
@@ -264,11 +284,113 @@ router.post(
         );
       }
 
+      if (teacher_assignment) {
+        const {
+          course_campus_id,
+          period_id,
+          schedule_info = null,
+          campus_override_reason = null,
+          status = 'ACTIVE',
+        } = teacher_assignment;
+
+        const courseCampusResult = await tx.query(
+          `SELECT id, campus_id
+           FROM course_campus
+           WHERE id = $1
+           LIMIT 1`,
+          [course_campus_id],
+        );
+
+        if (courseCampusResult.rowCount === 0) {
+          throw new ApiError(400, 'La oferta de curso/sede seleccionada no existe.');
+        }
+
+        const selectedCampusId = Number(courseCampusResult.rows[0].campus_id);
+        if (creatorBaseCampusId && Number(creatorBaseCampusId) !== selectedCampusId) {
+          throw new ApiError(403, 'Solo puede asignar docentes a cursos de su propia sede.');
+        }
+
+        const normalizedOverrideReason = campus_override_reason?.trim() || null;
+        const teacherBaseCampusId = user.base_campus_id || null;
+        const isCampusOverride =
+          teacherBaseCampusId !== null &&
+          teacherBaseCampusId !== undefined &&
+          Number(teacherBaseCampusId) !== selectedCampusId;
+
+        if (isCampusOverride && !normalizedOverrideReason) {
+          throw new ApiError(
+            400,
+            'El docente tiene una sede base diferente. Debe indicar el motivo del cambio manual de sede.',
+          );
+        }
+
+        const overrideReasonToSave = isCampusOverride ? normalizedOverrideReason : null;
+        const overrideByToSave = isCampusOverride ? req.user.id : null;
+        const overrideAtToSave = isCampusOverride ? new Date().toISOString() : null;
+
+        const assignmentResult = await tx.query(
+          `INSERT INTO teacher_assignments (
+             teacher_user_id,
+             course_campus_id,
+             period_id,
+             schedule_info,
+             campus_override_reason,
+             campus_override_by,
+             campus_override_at,
+             status,
+             created_by
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (teacher_user_id, course_campus_id, period_id)
+           DO UPDATE SET
+             schedule_info = EXCLUDED.schedule_info,
+             campus_override_reason = EXCLUDED.campus_override_reason,
+             campus_override_by = EXCLUDED.campus_override_by,
+             campus_override_at = EXCLUDED.campus_override_at,
+             status = EXCLUDED.status,
+             updated_at = NOW()
+           RETURNING id`,
+          [
+            user.id,
+            course_campus_id,
+            period_id,
+            schedule_info,
+            overrideReasonToSave,
+            overrideByToSave,
+            overrideAtToSave,
+            status,
+            req.user?.id || null,
+          ],
+        );
+
+        if (isCampusOverride && req.user?.id) {
+          await tx.query(
+            `INSERT INTO audit_logs (actor_user_id, entity, entity_id, action, payload)
+             VALUES ($1, $2, $3, $4, $5::jsonb)`,
+            [
+              req.user.id,
+              'teacher_assignments',
+              String(assignmentResult.rows[0].id),
+              'CAMPUS_OVERRIDE',
+              JSON.stringify({
+                teacher_user_id: user.id,
+                course_campus_id,
+                period_id,
+                teacher_base_campus_id: teacherBaseCampusId,
+                selected_campus_id: selectedCampusId,
+                reason: normalizedOverrideReason,
+              }),
+            ],
+          );
+        }
+      }
+
       return { ...user, roles };
     });
 
     invalidateUserPermissionCache(created.id);
     invalidateCacheByPrefix('teachers:list');
+    invalidateCacheByPrefix('teachers:assignments:list');
 
     return res.status(201).json({ message: 'Usuario registrado.', user: created });
   }),

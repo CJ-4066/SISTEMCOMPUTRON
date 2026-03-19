@@ -6,6 +6,7 @@ const routeLoaders = {
   '/teachers': () => import('../pages/TeachersPage'),
   '/courses': () => import('../pages/CoursesPage'),
   '/courses/salon': () => import('../pages/CourseWorkspacePage'),
+  '/courses/salon/examen/nuevo': () => import('../pages/ExamBuilderPage'),
   '/my-grades': () => import('../pages/StudentGradesPage'),
   '/calendar': () => import('../pages/CalendarPage'),
   '/payments': () => import('../pages/PaymentsPage'),
@@ -38,6 +39,7 @@ let cancelScheduledStep = null;
 
 const normalizeRoute = (path = '') => {
   const normalizedPath = String(path || '').split('?')[0].split('#')[0];
+  if (/^\/courses\/salon\/[^/]+\/examen\/nuevo$/.test(normalizedPath)) return '/courses/salon/examen/nuevo';
   if (normalizedPath.startsWith('/courses/salon/')) return '/courses/salon';
   return normalizedPath;
 };

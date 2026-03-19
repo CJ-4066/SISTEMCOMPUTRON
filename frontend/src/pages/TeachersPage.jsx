@@ -17,6 +17,12 @@ const teacherDefaults = {
   password: '',
   base_campus_id: '',
   use_email_as_password: false,
+  create_initial_assignment: false,
+  assignment_campus_id: '',
+  assignment_course_campus_id: '',
+  assignment_period_id: '',
+  assignment_schedule_info: '',
+  assignment_campus_override_reason: '',
 };
 
 const assignmentDefaults = {
@@ -42,10 +48,21 @@ export default function TeachersPage() {
   const { user, hasPermission } = useAuth();
   const userRoles = user?.roles || [];
   const isRootAdminProfile = userRoles.includes('ADMIN') && !user?.base_campus_id;
+  const canViewTeachers = hasPermission(PERMISSIONS.TEACHERS_VIEW);
+  const canViewAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW);
+  const canManageAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_MANAGE);
+  const canCreateUsers = hasPermission(PERMISSIONS.USERS_CREATE);
+  const canManageTeacherProfile = hasPermission(PERMISSIONS.USERS_STATUS_MANAGE);
+  const canViewCampuses = hasPermission(PERMISSIONS.CAMPUSES_VIEW);
   const defaultTeacherCampusId = !isRootAdminProfile && user?.base_campus_id ? String(user.base_campus_id) : '';
+  const canSelectTeacherCampus = Boolean(isRootAdminProfile && canViewCampuses);
+  const isDocenteProfile =
+    (user?.roles || []).length === 1 && (user?.roles || []).includes('DOCENTE');
   const createTeacherFormDefaults = () => ({
     ...teacherDefaults,
     base_campus_id: defaultTeacherCampusId,
+    create_initial_assignment: Boolean(canManageAssignments),
+    assignment_campus_id: defaultTeacherCampusId,
   });
   const [teachers, setTeachers] = useState([]);
   const [campuses, setCampuses] = useState([]);
@@ -68,24 +85,15 @@ export default function TeachersPage() {
     startTabTransition(() => setActiveTab(nextTab));
   };
 
-  const canViewTeachers = hasPermission(PERMISSIONS.TEACHERS_VIEW);
-  const canViewAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW);
-  const canManageAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_MANAGE);
-  const canCreateUsers = hasPermission(PERMISSIONS.USERS_CREATE);
-  const canManageTeacherProfile = hasPermission(PERMISSIONS.USERS_STATUS_MANAGE);
-  const canViewCampuses = hasPermission(PERMISSIONS.CAMPUSES_VIEW);
-  const canSelectTeacherCampus = Boolean(isRootAdminProfile && canViewCampuses);
-  const isDocenteProfile =
-    (user?.roles || []).length === 1 && (user?.roles || []).includes('DOCENTE');
-
   const loadData = useCallback(async () => {
     try {
+      const scopeConfig = canSelectTeacherCampus ? { _skipCampusScope: true } : {};
       const [teachersRes, campusesRes, coursesRes, periodsRes, assignmentsRes] = await Promise.all([
-        canViewTeachers ? api.get('/teachers') : Promise.resolve(null),
-        canViewCampuses ? api.get('/campuses') : Promise.resolve(null),
-        canManageAssignments ? api.get('/courses') : Promise.resolve(null),
+        canViewTeachers ? api.get('/teachers', scopeConfig) : Promise.resolve(null),
+        canViewCampuses ? api.get('/campuses', scopeConfig) : Promise.resolve(null),
+        canManageAssignments ? api.get('/courses', scopeConfig) : Promise.resolve(null),
         canManageAssignments ? api.get('/catalogs/periods') : Promise.resolve(null),
-        canViewAssignments ? api.get('/teachers/assignments') : Promise.resolve(null),
+        canViewAssignments ? api.get('/teachers/assignments', scopeConfig) : Promise.resolve(null),
       ]);
 
       setTeachers(teachersRes?.data?.items || []);
@@ -96,7 +104,7 @@ export default function TeachersPage() {
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'No se pudo cargar el modulo de docentes.');
     }
-  }, [canManageAssignments, canViewAssignments, canViewCampuses, canViewTeachers]);
+  }, [canManageAssignments, canSelectTeacherCampus, canViewAssignments, canViewCampuses, canViewTeachers]);
 
   useEffect(() => {
     loadData();
@@ -119,12 +127,40 @@ export default function TeachersPage() {
         rows.push({
           id: offering.offering_id,
           campus_id: offering.campus_id,
+          campus_name: offering.campus_name || 'Sin sede',
+          course_name: course.name || '',
+          modality: offering.modality || 'PRESENCIAL',
           label: `${course.name} - ${offering.campus_name} (${offering.modality || 'PRESENCIAL'})`,
         });
       }
     }
     return rows;
   }, [courses]);
+
+  const defaultPeriodId = useMemo(() => {
+    const activePeriod = periods.find((period) => period.is_active) || periods[0];
+    return activePeriod ? String(activePeriod.id) : '';
+  }, [periods]);
+
+  const teacherAssignmentCampusOptions = useMemo(() => {
+    const campusMap = new Map();
+
+    for (const campus of campuses) {
+      const campusId = Number(campus.id || 0);
+      if (!campusId || campusMap.has(campusId)) continue;
+      campusMap.set(campusId, campus.name || `Sede #${campusId}`);
+    }
+
+    for (const offering of offerings) {
+      const campusId = Number(offering.campus_id || 0);
+      if (!campusId || campusMap.has(campusId)) continue;
+      campusMap.set(campusId, offering.campus_name || `Sede #${campusId}`);
+    }
+
+    return Array.from(campusMap.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((left, right) => String(left.name).localeCompare(String(right.name), 'es', { sensitivity: 'base' }));
+  }, [campuses, offerings]);
 
   const selectedAssignmentTeacher = useMemo(() => {
     return teachers.find((teacher) => String(teacher.id) === String(assignmentForm.teacher_user_id)) || null;
@@ -150,6 +186,79 @@ export default function TeachersPage() {
     return `Sede #${currentCampusId}`;
   }, [campuses, defaultTeacherCampusId, teacherForm.base_campus_id]);
 
+  const effectiveTeacherAssignmentCampusId = canSelectTeacherCampus
+    ? String(teacherForm.assignment_campus_id || '')
+    : String(teacherForm.assignment_campus_id || teacherForm.base_campus_id || defaultTeacherCampusId || '');
+
+  const filteredTeacherAssignmentOfferings = useMemo(() => {
+    if (!effectiveTeacherAssignmentCampusId) {
+      return canSelectTeacherCampus ? [] : offerings;
+    }
+
+    return offerings.filter((offering) => String(offering.campus_id) === String(effectiveTeacherAssignmentCampusId));
+  }, [canSelectTeacherCampus, effectiveTeacherAssignmentCampusId, offerings]);
+
+  const selectedTeacherInitialOffering = useMemo(
+    () =>
+      filteredTeacherAssignmentOfferings.find(
+        (offering) => String(offering.id) === String(teacherForm.assignment_course_campus_id),
+      ) || null,
+    [filteredTeacherAssignmentOfferings, teacherForm.assignment_course_campus_id],
+  );
+
+  const teacherInitialAssignmentRequiresCampusOverrideReason =
+    Boolean(teacherForm.base_campus_id) &&
+    Boolean(selectedTeacherInitialOffering?.campus_id) &&
+    Number(teacherForm.base_campus_id) !== Number(selectedTeacherInitialOffering.campus_id);
+
+  useEffect(() => {
+    if (!showTeacherForm || editingTeacherId || !canManageAssignments) return;
+
+    const nextCampusId = teacherForm.base_campus_id || defaultTeacherCampusId;
+    const nextPeriodId = defaultPeriodId;
+
+    if (!nextCampusId && !nextPeriodId) return;
+
+    setTeacherForm((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      if (!next.assignment_campus_id && nextCampusId) {
+        next.assignment_campus_id = nextCampusId;
+        changed = true;
+      }
+
+      if (!next.assignment_period_id && nextPeriodId) {
+        next.assignment_period_id = nextPeriodId;
+        changed = true;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [canManageAssignments, defaultPeriodId, defaultTeacherCampusId, editingTeacherId, showTeacherForm, teacherForm.base_campus_id]);
+
+  useEffect(() => {
+    if (!teacherForm.assignment_course_campus_id) return;
+    if (
+      filteredTeacherAssignmentOfferings.some(
+        (offering) => String(offering.id) === String(teacherForm.assignment_course_campus_id),
+      )
+    ) {
+      return;
+    }
+
+    setTeacherForm((prev) => ({
+      ...prev,
+      assignment_course_campus_id: '',
+      assignment_campus_override_reason: '',
+    }));
+  }, [filteredTeacherAssignmentOfferings, teacherForm.assignment_course_campus_id]);
+
+  useEffect(() => {
+    if (teacherInitialAssignmentRequiresCampusOverrideReason || !teacherForm.assignment_campus_override_reason) return;
+    setTeacherForm((prev) => ({ ...prev, assignment_campus_override_reason: '' }));
+  }, [teacherForm.assignment_campus_override_reason, teacherInitialAssignmentRequiresCampusOverrideReason]);
+
   const submitTeacher = async (event) => {
     event.preventDefault();
     if (!canCreateUsers && !canManageTeacherProfile) return;
@@ -160,6 +269,8 @@ export default function TeachersPage() {
     const normalizedEmail = teacherForm.email.trim().toLowerCase();
     const useEmailAsPassword = !editingTeacherId && Boolean(teacherForm.use_email_as_password);
     const resolvedPassword = useEmailAsPassword ? normalizedEmail : teacherForm.password;
+    const shouldCreateInitialAssignment =
+      !editingTeacherId && canManageAssignments && Boolean(teacherForm.create_initial_assignment);
 
     if (useEmailAsPassword && normalizedEmail.length < 8) {
       setError('El correo debe tener al menos 8 caracteres para usarlo como contraseña temporal.');
@@ -169,6 +280,31 @@ export default function TeachersPage() {
     if (!editingTeacherId && !useEmailAsPassword && teacherForm.password.trim().length < 8) {
       setError('La contraseña del docente debe tener al menos 8 caracteres.');
       return;
+    }
+
+    if (shouldCreateInitialAssignment) {
+      if (!effectiveTeacherAssignmentCampusId) {
+        setError('Selecciona la sede donde el docente dictará su curso inicial.');
+        return;
+      }
+
+      if (!teacherForm.assignment_course_campus_id) {
+        setError('Selecciona el curso que dictará el docente.');
+        return;
+      }
+
+      if (!teacherForm.assignment_period_id) {
+        setError('Selecciona el periodo académico de la asignación inicial.');
+        return;
+      }
+
+      if (
+        teacherInitialAssignmentRequiresCampusOverrideReason &&
+        !teacherForm.assignment_campus_override_reason.trim()
+      ) {
+        setError('Indica el motivo si el curso inicial se dictará en una sede distinta a la sede base del docente.');
+        return;
+      }
     }
 
     try {
@@ -210,13 +346,31 @@ export default function TeachersPage() {
           roles: ['DOCENTE'],
           base_campus_id: nextBaseCampusId,
           must_change_password: useEmailAsPassword,
+          ...(shouldCreateInitialAssignment
+            ? {
+                teacher_assignment: {
+                  course_campus_id: Number(teacherForm.assignment_course_campus_id),
+                  period_id: Number(teacherForm.assignment_period_id),
+                  schedule_info: normalizeOptional(teacherForm.assignment_schedule_info),
+                  campus_override_reason: teacherInitialAssignmentRequiresCampusOverrideReason
+                    ? teacherForm.assignment_campus_override_reason.trim()
+                    : null,
+                },
+              }
+            : {}),
         });
       }
 
       setTeacherForm(createTeacherFormDefaults());
       setEditingTeacherId(null);
       setShowTeacherForm(false);
-      setMessage(editingTeacherId ? 'Docente actualizado correctamente.' : 'Docente creado correctamente.');
+      setMessage(
+        editingTeacherId
+          ? 'Docente actualizado correctamente.'
+          : shouldCreateInitialAssignment
+            ? 'Docente y asignación inicial guardados correctamente.'
+            : 'Docente creado correctamente.',
+      );
       await loadData();
     } catch (requestError) {
       setError(
@@ -240,6 +394,12 @@ export default function TeachersPage() {
       password: '',
       base_campus_id: teacher.base_campus_id ? String(teacher.base_campus_id) : '',
       use_email_as_password: false,
+      create_initial_assignment: false,
+      assignment_campus_id: teacher.base_campus_id ? String(teacher.base_campus_id) : '',
+      assignment_course_campus_id: '',
+      assignment_period_id: defaultPeriodId,
+      assignment_schedule_info: '',
+      assignment_campus_override_reason: '',
     });
     setEditingTeacherId(teacher.id);
     setShowTeacherForm(true);
@@ -346,7 +506,9 @@ export default function TeachersPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-primary-900">Docentes y carga academica</h1>
-          <p className="text-sm text-primary-700">Operacion separada entre registro de docentes y asignaciones.</p>
+          <p className="text-sm text-primary-700">
+            Registra docentes y, si quieres, deja lista su primera asignación académica en el mismo formulario.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <span className="rounded-full bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-800">
@@ -679,7 +841,19 @@ export default function TeachersPage() {
                       className="app-input"
                       value={teacherForm.base_campus_id}
                       onChange={(event) =>
-                        setTeacherForm((prev) => ({ ...prev, base_campus_id: event.target.value }))
+                        setTeacherForm((prev) => ({
+                          ...prev,
+                          base_campus_id: event.target.value,
+                          assignment_campus_id:
+                            !editingTeacherId &&
+                            (!prev.assignment_course_campus_id || prev.assignment_campus_id === prev.base_campus_id)
+                              ? event.target.value
+                              : prev.assignment_campus_id,
+                          assignment_campus_override_reason:
+                            !editingTeacherId && prev.assignment_campus_id === prev.base_campus_id
+                              ? ''
+                              : prev.assignment_campus_override_reason,
+                        }))
                       }
                       required={!editingTeacherId}
                       disabled={Boolean(editingTeacherId && !canManageAssignments)}
@@ -739,6 +913,157 @@ export default function TeachersPage() {
                   required
                 />
               </div>
+
+              {!editingTeacherId && canManageAssignments ? (
+                <div className="space-y-3 rounded-xl border border-primary-200 bg-white p-4">
+                  <label className="flex items-start gap-3 text-sm text-primary-800">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4"
+                      checked={Boolean(teacherForm.create_initial_assignment)}
+                      onChange={(event) =>
+                        setTeacherForm((prev) => ({
+                          ...prev,
+                          create_initial_assignment: event.target.checked,
+                          assignment_campus_id: prev.assignment_campus_id || prev.base_campus_id || defaultTeacherCampusId,
+                          assignment_period_id: prev.assignment_period_id || defaultPeriodId,
+                        }))
+                      }
+                    />
+                    <span>
+                      <span className="block font-semibold text-primary-900">Configurar carga académica inicial</span>
+                      <span className="block text-xs text-primary-700">
+                        Asigna desde ahora la sede, el curso y el periodo en que este docente empezará a dictar.
+                      </span>
+                    </span>
+                  </label>
+
+                  {teacherForm.create_initial_assignment ? (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <label className="space-y-1">
+                        <span className="text-xs font-semibold text-primary-700">Sede donde dictará</span>
+                        {canSelectTeacherCampus ? (
+                          <select
+                            className="app-input"
+                            value={effectiveTeacherAssignmentCampusId}
+                            onChange={(event) =>
+                              setTeacherForm((prev) => ({
+                                ...prev,
+                                assignment_campus_id: event.target.value,
+                                assignment_course_campus_id: '',
+                                assignment_campus_override_reason: '',
+                              }))
+                            }
+                            required
+                          >
+                            <option value="">Selecciona una sede</option>
+                            {teacherAssignmentCampusOptions.map((campus) => (
+                              <option key={campus.id} value={campus.id}>
+                                {campus.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input className="app-input" value={teacherCampusDisplayName} readOnly disabled />
+                        )}
+                      </label>
+
+                      <label className="space-y-1">
+                        <span className="text-xs font-semibold text-primary-700">Curso a dictar</span>
+                        <select
+                          className="app-input"
+                          value={teacherForm.assignment_course_campus_id}
+                          onChange={(event) =>
+                            setTeacherForm((prev) => ({
+                              ...prev,
+                              assignment_course_campus_id: event.target.value,
+                              assignment_campus_override_reason: '',
+                            }))
+                          }
+                          required
+                          disabled={
+                            (canSelectTeacherCampus && !effectiveTeacherAssignmentCampusId) ||
+                            filteredTeacherAssignmentOfferings.length === 0
+                          }
+                        >
+                          <option value="">
+                            {filteredTeacherAssignmentOfferings.length ? 'Selecciona un curso' : 'No hay cursos disponibles'}
+                          </option>
+                          {filteredTeacherAssignmentOfferings.map((offering) => (
+                            <option key={offering.id} value={offering.id}>
+                              {offering.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="space-y-1">
+                        <span className="text-xs font-semibold text-primary-700">Periodo académico</span>
+                        <select
+                          className="app-input"
+                          value={teacherForm.assignment_period_id}
+                          onChange={(event) =>
+                            setTeacherForm((prev) => ({ ...prev, assignment_period_id: event.target.value }))
+                          }
+                          required
+                          disabled={periods.length === 0}
+                        >
+                          <option value="">{periods.length ? 'Selecciona un periodo' : 'No hay periodos'}</option>
+                          {periods.map((period) => (
+                            <option key={period.id} value={period.id}>
+                              {period.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="space-y-1">
+                        <span className="text-xs font-semibold text-primary-700">Horario / turno</span>
+                        <input
+                          className="app-input"
+                          placeholder="Ej. Lun-Mie-Vie 7:00 pm a 9:00 pm"
+                          value={teacherForm.assignment_schedule_info}
+                          onChange={(event) =>
+                            setTeacherForm((prev) => ({ ...prev, assignment_schedule_info: event.target.value }))
+                          }
+                        />
+                      </label>
+
+                      {selectedTeacherInitialOffering ? (
+                        <div className="rounded-xl border border-primary-100 bg-primary-50 px-3 py-3 text-xs text-primary-800 sm:col-span-2 lg:col-span-4">
+                          Se asignará el curso <span className="font-semibold">{selectedTeacherInitialOffering.course_name}</span> en{' '}
+                          <span className="font-semibold">{selectedTeacherInitialOffering.campus_name}</span>
+                          {' '}({selectedTeacherInitialOffering.modality}).
+                        </div>
+                      ) : null}
+
+                      {teacherInitialAssignmentRequiresCampusOverrideReason ? (
+                        <label className="space-y-1 sm:col-span-2 lg:col-span-4">
+                          <span className="text-xs font-semibold text-red-700">
+                            Motivo de asignación en sede distinta
+                          </span>
+                          <textarea
+                            className="app-input min-h-[96px]"
+                            placeholder="Explica por qué este docente dictará en una sede diferente a su sede base."
+                            value={teacherForm.assignment_campus_override_reason}
+                            onChange={(event) =>
+                              setTeacherForm((prev) => ({
+                                ...prev,
+                                assignment_campus_override_reason: event.target.value,
+                              }))
+                            }
+                            required
+                          />
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-primary-700">
+                      Puedes dejarlo sin asignación inicial y completar su carga académica después desde la pestaña de asignaciones.
+                    </p>
+                  )}
+                </div>
+              ) : null}
 
               <div className="flex flex-wrap gap-2">
                 <button className="rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700">

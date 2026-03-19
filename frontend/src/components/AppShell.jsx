@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowLeftRight,
   BookOpenText,
   CalendarRange,
   ClipboardCheck,
@@ -25,6 +26,19 @@ import { preloadCoreRoutes, preloadRoute } from '../utils/routePreload';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, permissions: [PERMISSIONS.DASHBOARD_VIEW] },
+  {
+    to: '/courses',
+    label: 'Salones',
+    icon: BookOpenText,
+    permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW],
+  },
+  {
+    to: '/students?tab=transfers',
+    label: 'Traslados',
+    icon: ArrowLeftRight,
+    permissions: [PERMISSIONS.STUDENTS_VIEW, PERMISSIONS.ENROLLMENTS_MANAGE],
+    roles: ['ADMIN'],
+  },
   {
     to: '/courses?tab=attendance',
     label: 'Asistencias',
@@ -103,6 +117,7 @@ export default function AppShell() {
   }, []);
 
   const roles = useMemo(() => user?.roles || [], [user]);
+  const isAdminProfile = roles.includes('ADMIN');
   const isDocenteProfile = roles.length === 1 && roles.includes('DOCENTE');
   const isAlumnoProfile = roles.length === 1 && roles.includes('ALUMNO');
   const isTeacher2222 =
@@ -114,16 +129,25 @@ export default function AppShell() {
   const activeCoursesTab = location.pathname === '/courses' ? new URLSearchParams(location.search).get('tab') : null;
   const isAttendanceTabActive = activeCoursesTab === 'attendance';
   const isCourseWorkspaceRoute = location.pathname.startsWith('/courses/salon/');
+  const isCoursesOverviewRoute =
+    (location.pathname === '/courses' && activeCoursesTab !== 'attendance') || isCourseWorkspaceRoute;
   const requestedDashboardSection = isDashboardRoute
     ? new URLSearchParams(location.search).get('section')
     : null;
   const requestedManagementSection = isManagementRoute
     ? new URLSearchParams(location.search).get('section')
     : null;
+  const canUseTransfersShortcut =
+    isAdminProfile && hasAnyPermission([PERMISSIONS.STUDENTS_VIEW, PERMISSIONS.ENROLLMENTS_MANAGE]);
 
   const isNavItemActive = (itemPath, pathActive) => {
+    if (itemPath === '/courses') {
+      return isCoursesOverviewRoute;
+    }
+    if (itemPath === '/students?tab=transfers') {
+      return location.pathname === '/students' && activeStudentTab === 'transfers';
+    }
     if (itemPath === '/courses?tab=attendance') {
-      if (isCourseWorkspaceRoute) return true;
       return location.pathname === '/courses' && isAttendanceTabActive;
     }
     return pathActive;
@@ -134,8 +158,11 @@ export default function AppShell() {
       return [];
     }
 
-    return MANAGEMENT_SECTION_ITEMS.filter((item) => hasAnyPermission(item.permissions || []));
-  }, [hasAnyPermission, isAlumnoProfile, isDocenteProfile]);
+    return MANAGEMENT_SECTION_ITEMS.filter((item) => {
+      if (item.key === 'transfers' && canUseTransfersShortcut) return false;
+      return hasAnyPermission(item.permissions || []);
+    });
+  }, [canUseTransfersShortcut, hasAnyPermission, isAlumnoProfile, isDocenteProfile]);
 
   const visibleDashboardItems = useMemo(() => {
     if (isAlumnoProfile || isTeacher2222) {
@@ -170,6 +197,9 @@ export default function AppShell() {
     if (item.adminOnly && isDocenteProfile) return false;
     if (item.to === '/certificates') return false;
     if (!hasAnyPermission(item.permissions || [])) return false;
+    if (Array.isArray(item.roles) && item.roles.length > 0 && !item.roles.some((role) => roles.includes(role))) {
+      return false;
+    }
     if (isTeacher2222 && item.to === '/') return false;
     if (isDocenteProfile && item.to === '/teachers') return false;
     return true;
@@ -179,7 +209,8 @@ export default function AppShell() {
 
   const isCertificatesRoute = location.pathname === '/certificates';
   const dashboardMenuActive = isDashboardRoute || isDashboardExpanded;
-  const managementMenuActive = isManagementRoute || isStudentTransfersRoute || isManagementExpanded;
+  const managementMenuActive =
+    isManagementRoute || (!canUseTransfersShortcut && isStudentTransfersRoute) || isManagementExpanded;
 
   const renderSidebarLabel = (label, Icon, active, { trailing = null, compact = false } = {}) => (
     <span className="flex items-center justify-between gap-3">

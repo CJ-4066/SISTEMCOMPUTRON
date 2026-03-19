@@ -146,7 +146,7 @@ export default function StudentsPage() {
   const transferSearchRequestIdRef = useRef(0);
 
   const userRoles = user?.roles || [];
-  const isRootAdminProfile = userRoles.includes('ADMIN') && !user?.base_campus_id;
+  const isAdminProfile = userRoles.includes('ADMIN');
   const canViewStudents = hasPermission(PERMISSIONS.STUDENTS_VIEW);
   const canManageStudents = hasPermission(PERMISSIONS.STUDENTS_MANAGE);
   const canViewGuardians = hasPermission(PERMISSIONS.GUARDIANS_VIEW);
@@ -160,7 +160,8 @@ export default function StudentsPage() {
   const canUseInlineEnrollment = canManageStudents && canManageEnrollments && canViewCourses && canViewPeriods;
   const canViewTransfers = canViewStudents;
   const canManageTransfers = canViewStudents && canManageEnrollments;
-  const canSelectTransferCampus = Boolean(isRootAdminProfile && canReadCampuses);
+  const canManageTransferRequestsAcrossCampuses = isAdminProfile && canManageTransfers;
+  const canSelectTransferCampus = Boolean(isAdminProfile && canViewTransfers && canReadCampuses);
   const showStudentActions = canManageStudents || canManageTransfers;
   const resolveTabKey = useCallback(
     (candidateTab) => {
@@ -297,14 +298,19 @@ export default function StudentsPage() {
 
     setTransferLoading(true);
     try {
-      const response = await api.get('/students/transfers');
+      const response = await api.get('/students/transfers', {
+        params: {
+          campus_id: canSelectTransferCampus && transferCampusFilter ? Number(transferCampusFilter) : undefined,
+        },
+        ...(canSelectTransferCampus ? { _skipCampusScope: true } : {}),
+      });
       setTransferRequests(response.data.items || []);
     } catch (requestError) {
       setTransferError(requestError.response?.data?.message || 'No se pudieron cargar las solicitudes de traslado.');
     } finally {
       setTransferLoading(false);
     }
-  }, [canViewTransfers]);
+  }, [canSelectTransferCampus, canViewTransfers, transferCampusFilter]);
 
   const loadTransferStudentResults = useCallback(
     async (search = '') => {
@@ -530,10 +536,14 @@ export default function StudentsPage() {
     return options;
   }, [courses]);
 
-  const pendingIncomingTransfers = useMemo(
+  const pendingTransferReviewsCount = useMemo(
     () =>
-      transferRequests.filter((item) => item.direction === 'INCOMING' && item.status === 'PENDING').length,
-    [transferRequests],
+      transferRequests.filter((item) => {
+        if (item.status !== 'PENDING') return false;
+        if (canManageTransferRequestsAcrossCampuses) return true;
+        return item.direction === 'INCOMING';
+      }).length,
+    [canManageTransferRequestsAcrossCampuses, transferRequests],
   );
 
   const filteredTransferStudentResults = useMemo(() => {
@@ -855,9 +865,16 @@ export default function StudentsPage() {
   const resolveTransferRequest = async (transfer, decision) => {
     if (!canManageTransfers || !transfer?.id) return;
 
-    const campusScopeId = getCampusScopeId();
-    if (!campusScopeId) {
-      setTransferError('Selecciona la sede destino activa para revisar el traslado.');
+    const reviewCampusScopeId = canManageTransferRequestsAcrossCampuses
+      ? Number(transfer.target_campus_id || 0) || getCampusScopeId()
+      : getCampusScopeId();
+
+    if (!reviewCampusScopeId) {
+      setTransferError(
+        canManageTransferRequestsAcrossCampuses
+          ? 'No se pudo identificar la sede destino para revisar el traslado.'
+          : 'Selecciona la sede destino activa para revisar el traslado.',
+      );
       return;
     }
 
@@ -886,7 +903,7 @@ export default function StudentsPage() {
           review_notes: reviewNotes || null,
         },
         {
-          params: { campus_id: campusScopeId },
+          params: { campus_id: reviewCampusScopeId },
         },
       );
 
@@ -1010,13 +1027,13 @@ export default function StudentsPage() {
                 <ArrowLeftRight className="h-4 w-4" />
               </span>
               <span>Traslados</span>
-              {pendingIncomingTransfers > 0 ? (
+              {pendingTransferReviewsCount > 0 ? (
                 <span
                   className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                     activeTab === 'transfers' ? 'bg-white/20 text-white' : 'bg-accent-100 text-accent-800'
                   }`}
                 >
-                  {pendingIncomingTransfers}
+                  {pendingTransferReviewsCount}
                 </span>
               ) : null}
             </span>
@@ -1036,10 +1053,15 @@ export default function StudentsPage() {
       {activeTab === 'transfers' && transferError ? (
         <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{transferError}</p>
       ) : null}
-      {activeTab === 'transfers' && canViewTransfers && pendingIncomingTransfers > 0 ? (
+      {activeTab === 'transfers' && canViewTransfers && pendingTransferReviewsCount > 0 ? (
         <p className="rounded-xl bg-accent-50 p-3 text-sm text-accent-800">
-          Tienes {pendingIncomingTransfers} solicitud{pendingIncomingTransfers === 1 ? '' : 'es'} de traslado por revisar
-          en la sede activa.
+          {canManageTransferRequestsAcrossCampuses
+            ? `Tienes ${pendingTransferReviewsCount} solicitud${
+                pendingTransferReviewsCount === 1 ? '' : 'es'
+              } de traslado pendiente${pendingTransferReviewsCount === 1 ? '' : 's'} por revisar en el panel global.`
+            : `Tienes ${pendingTransferReviewsCount} solicitud${
+                pendingTransferReviewsCount === 1 ? '' : 'es'
+              } de traslado por revisar en la sede activa.`}
         </p>
       ) : null}
 
@@ -1443,7 +1465,9 @@ export default function StudentsPage() {
             <div>
               <h2 className="text-lg font-semibold text-primary-900">Solicitudes de traslado entre sedes</h2>
               <p className="text-sm text-primary-700">
-                La sede origen registra la solicitud y la sede destino la aprueba o la rechaza.
+                {canManageTransferRequestsAcrossCampuses
+                  ? 'La sede origen registra la solicitud y el perfil administrador puede revisarla desde este panel para cualquier sede.'
+                  : 'La sede origen registra la solicitud y la sede destino la aprueba o la rechaza.'}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1451,7 +1475,7 @@ export default function StudentsPage() {
                 {transferRequests.length} solicitudes
               </span>
               <span className="rounded-full bg-accent-100 px-3 py-1 text-xs font-semibold text-accent-800">
-                {pendingIncomingTransfers} pendientes por revisar
+                {pendingTransferReviewsCount} pendientes por revisar
               </span>
               {loadingTransferOptions ? (
                 <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-primary-700">
@@ -1475,7 +1499,7 @@ export default function StudentsPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 {canSelectTransferCampus ? (
                   <label className="space-y-1">
-                    <span className="text-xs font-semibold text-primary-700">Filtrar alumnos por sede</span>
+                    <span className="text-xs font-semibold text-primary-700">Filtrar por sede</span>
                     <select
                       className="app-input"
                       value={transferCampusFilter}
@@ -1488,6 +1512,9 @@ export default function StudentsPage() {
                         </option>
                       ))}
                     </select>
+                    <span className="block text-[11px] text-primary-600">
+                      Este filtro aplica al buscador de alumnos y al listado de solicitudes.
+                    </span>
                   </label>
                 ) : null}
 
@@ -1768,6 +1795,10 @@ export default function StudentsPage() {
               </thead>
               <tbody>
                 {transferRequests.map((item) => {
+                  const canReviewRequest =
+                    canManageTransfers &&
+                    item.status === 'PENDING' &&
+                    (item.can_review || canManageTransferRequestsAcrossCampuses);
                   const statusClassName =
                     item.status === 'APPROVED'
                       ? 'bg-primary-100 text-primary-800'
@@ -1818,7 +1849,7 @@ export default function StudentsPage() {
                         ) : null}
                       </td>
                       <td className="py-2">
-                        {item.can_review && canManageTransfers ? (
+                        {canReviewRequest ? (
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
@@ -1848,7 +1879,11 @@ export default function StudentsPage() {
                 {!transferLoading && transferRequests.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="py-4 text-center text-sm text-primary-600">
-                      No hay solicitudes de traslado para la sede activa.
+                      {canSelectTransferCampus && transferCampusFilter
+                        ? 'No hay solicitudes de traslado para la sede seleccionada.'
+                        : canManageTransferRequestsAcrossCampuses
+                          ? 'No hay solicitudes de traslado registradas para el filtro actual.'
+                          : 'No hay solicitudes de traslado para la sede activa.'}
                     </td>
                   </tr>
                 ) : null}
