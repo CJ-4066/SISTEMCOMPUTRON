@@ -149,39 +149,47 @@ export default function StudentPaymentsPage() {
         </table>
       </article>
 
-      <article className="card overflow-x-auto">
-        <h2 className="text-lg font-semibold text-primary-900">Historial de pagos</h2>
-        <table className="mt-3 min-w-full text-sm">
-          <thead>
-            <tr className="text-left text-primary-600">
-              <th className="pb-2 pr-3">Fecha</th>
-              <th className="pb-2 pr-3">Curso</th>
-              <th className="pb-2 pr-3">Monto</th>
-              <th className="pb-2 pr-3">Método</th>
-              <th className="pb-2">Estado</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold text-primary-900 mb-4">Historial de pagos</h2>
+        
+        {!loading && !payments.length ? (
+          <div className="py-10 text-center text-sm text-primary-600 bg-white border border-primary-100 rounded-2xl shadow-sm">
+            No tienes pagos registrados.
+          </div>
+        ) : (
+          <div className="grid gap-4 mt-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             {payments.map((payment) => (
-              <tr key={payment.id} className="border-t border-primary-100">
-                <td className="py-2 pr-3">{formatDate(payment.payment_date)}</td>
-                <td className="py-2 pr-3">{payment.course_name}</td>
-                <td className="py-2 pr-3">S/ {Number(payment.total_amount || 0).toFixed(2)}</td>
-                <td className="py-2 pr-3">{toPaymentMethodLabel(payment.method)}</td>
-                <td className="py-2">{toPaymentStatusLabel(payment.status)}</td>
-              </tr>
-            ))}
+              <div key={payment.id} className="flex flex-col rounded-2xl border border-primary-100 bg-white p-5 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md hover:border-primary-300">
+                <div className="flex justify-between items-start mb-3 gap-2">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-primary-900 text-base leading-tight truncate" title={payment.course_name}>
+                      {payment.course_name}
+                    </h3>
+                    <p className="text-xs text-primary-600 mt-1 truncate">
+                      {formatDate(payment.payment_date)}
+                    </p>
+                  </div>
+                </div>
 
-            {!loading && !payments.length ? (
-              <tr>
-                <td colSpan={5} className="py-4 text-center text-sm text-primary-700">
-                  No tienes pagos registrados.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </article>
+                <div className="bg-primary-50/50 rounded-xl p-3 border border-primary-50 mb-4 space-y-2 mt-auto">
+                  <div className="flex justify-between items-center text-xs gap-2">
+                    <span className="text-gray-500 font-medium whitespace-nowrap">Estado</span>
+                    <span className="font-bold text-primary-800 text-right">{toPaymentStatusLabel(payment.status)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs gap-2">
+                    <span className="text-gray-500 font-medium whitespace-nowrap">Método</span>
+                    <span className="text-gray-900 font-semibold truncate text-right">{toPaymentMethodLabel(payment.method)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs gap-2">
+                    <span className="text-gray-500 font-medium whitespace-nowrap">Monto Total</span>
+                    <span className="text-gray-900 font-bold text-right pt-1 border-t border-primary-50">S/ {Number(payment.total_amount || 0).toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

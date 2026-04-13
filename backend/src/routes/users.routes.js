@@ -46,6 +46,12 @@ const statusUpdateSchema = z.object({
   query: z.object({}).optional(),
 });
 
+const deleteUserSchema = z.object({
+  body: z.object({}).optional(),
+  params: z.object({ id: z.coerce.number().int().positive() }),
+  query: z.object({}).optional(),
+});
+
 const credentialsUpdateSchema = z.object({
   body: z
     .object({
@@ -393,6 +399,41 @@ router.patch(
     invalidateTeacherReadCaches();
 
     return res.json({ message: 'Estado actualizado.', user: rows[0] });
+  }),
+);
+
+router.delete(
+  '/:id',
+  authorizePermission('users.status.manage'),
+  validate(deleteUserSchema),
+  asyncHandler(async (req, res) => {
+    const userId = req.validated.params.id;
+
+    if (userId === req.user.id) {
+      throw new ApiError(400, 'No puedes eliminar tu propio usuario.');
+    }
+
+    const { rowCount } = await query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (rowCount === 0) {
+      throw new ApiError(404, 'Usuario no encontrado.');
+    }
+
+    try {
+      await query('DELETE FROM users WHERE id = $1', [userId]);
+
+      invalidateUserPermissionCache(userId);
+      invalidateTeacherReadCaches();
+
+      return res.json({ message: 'Usuario eliminado exitosamente.' });
+    } catch (error) {
+      if (error.code === '23503') {
+        throw new ApiError(
+          409,
+          'No se puede eliminar el usuario porque tiene registros dependientes y causaría inconsistencia (ej. docente asignado, creador de registros).',
+        );
+      }
+      throw error;
+    }
   }),
 );
 

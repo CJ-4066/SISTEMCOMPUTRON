@@ -20,30 +20,35 @@ const toLocalDate = (value) => {
   return date.toLocaleDateString();
 };
 
-const buildCertificateDownloadUrl = (item) => {
-  const params = new URLSearchParams({
-    v: `${Date.now()}`,
-    download: '1',
-    source: 'library',
-  });
+const formatDate = (value) => {
+  if (!value) return '';
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString();
+};
 
-  const fieldMappings = {
+const buildCertificateDownloadUrl = (item) => {
+  if (!item) return '#';
+
+  const params = new URLSearchParams({
+    source: 'library',
     nombre: item.student_name,
     documento: item.student_document,
-    codigo: item.certificate_code,
     curso: item.course_name,
     horas: item.hours_academic,
     modalidad: item.modality,
-    inicio: item.start_date,
-    fin: item.end_date,
-    emision: item.issue_date,
+    inicio: formatDate(item.start_date),
+    fin: formatDate(item.end_date),
+    emision: formatDate(item.issue_date),
     ciudad: item.city,
     institucion: item.organization,
-  };
+    codigo: item.certificate_code,
+    token: item.validation_token || '',
+  });
 
-  Object.entries(fieldMappings).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') {
-      params.set(key, String(value));
+  Array.from(params.keys()).forEach((key) => {
+    if (params.get(key) === 'null' || params.get(key) === 'undefined' || params.get(key) === '') {
+      params.delete(key);
     }
   });
 

@@ -1,8 +1,11 @@
 import { Suspense, lazy } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import AppShell from './components/AppShell';
+import { ThemeProvider } from './context/ThemeContext';
+import { Toaster } from 'sonner';
+import { ConfirmationProvider } from './context/ConfirmationContext';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const ForcePasswordChangePage = lazy(() => import('./pages/ForcePasswordChangePage'));
@@ -20,6 +23,7 @@ const CertificatesPage = lazy(() => import('./pages/CertificatesPage'));
 const StudentGradesPage = lazy(() => import('./pages/StudentGradesPage'));
 const UsersPage = lazy(() => import('./pages/UsersPage'));
 const VirtualLibraryPage = lazy(() => import('./pages/VirtualLibraryPage'));
+const CertificateVerificationPage = lazy(() => import('./pages/CertificateVerificationPage'));
 
 const routeFallback = (
   <section className="card">
@@ -29,150 +33,163 @@ const routeFallback = (
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route
-            path="/login"
-            element={
-              <Suspense fallback={routeFallback}>
-                <LoginPage />
-              </Suspense>
-            }
-          />
+    <ThemeProvider>
+      <AuthProvider>
+        <ConfirmationProvider>
+          <Toaster position="top-right" richColors closeButton />
+          <BrowserRouter>
+            <Routes>
+              <Route
+                path="/login"
+                element={
+                  <Suspense fallback={routeFallback}>
+                    <LoginPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/verificar/:token"
+                element={
+                  <Suspense fallback={routeFallback}>
+                    <CertificateVerificationPage />
+                  </Suspense>
+                }
+              />
 
-          <Route element={<ProtectedRoute />}>
-            <Route
-              path="/change-password"
-              element={
-                <Suspense fallback={routeFallback}>
-                  <ForcePasswordChangePage />
-                </Suspense>
-              }
-            />
-            <Route element={<AppShell />}>
-              <Route
-                path="/"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <DashboardPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/management"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <ManagementPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/students"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <StudentsPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/teachers"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <TeachersPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/courses"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <CoursesPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/courses/salon/:assignmentId/examen/nuevo"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <ExamBuilderPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/courses/salon/:assignmentId"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <CourseWorkspacePage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/calendar"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <CalendarPage />
-                  </Suspense>
-                }
-              />
-              <Route path="/grades" element={<Navigate to="/management" replace />} />
-              <Route
-                path="/my-grades"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <StudentGradesPage />
-                  </Suspense>
-                }
-              />
-              <Route path="/enrollments" element={<Navigate to="/management" replace />} />
-              <Route
-                path="/payments"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <PaymentsPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/certificate-library"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <CertificateLibraryPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/virtual-library"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <VirtualLibraryPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/certificates"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <CertificatesPage />
-                  </Suspense>
-                }
-              />
-              <Route path="/reports" element={<Navigate to="/management" replace />} />
-              <Route path="/notifications" element={<Navigate to="/management" replace />} />
-              <Route
-                path="/users"
-                element={
-                  <Suspense fallback={routeFallback}>
-                    <UsersPage />
-                  </Suspense>
-                }
-              />
-            </Route>
-          </Route>
+              <Route element={<ProtectedRoute />}>
+                <Route
+                  path="/change-password"
+                  element={
+                    <Suspense fallback={routeFallback}>
+                      <ForcePasswordChangePage />
+                    </Suspense>
+                  }
+                />
+                <Route element={<AppShell />}>
+                  <Route
+                    path="/"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <DashboardPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/management"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <ManagementPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/students"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <StudentsPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/teachers"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <TeachersPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/courses"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <CoursesPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/courses/salon/:assignmentId/examen/nuevo"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <ExamBuilderPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/courses/salon/:assignmentId"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <CourseWorkspacePage />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/calendar"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <CalendarPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route path="/grades" element={<Navigate to="/management" replace />} />
+                  <Route
+                    path="/my-grades"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <StudentGradesPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route path="/enrollments" element={<Navigate to="/management" replace />} />
+                  <Route
+                    path="/payments"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <PaymentsPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/certificate-library"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <CertificateLibraryPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/virtual-library"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <VirtualLibraryPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/certificates"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <CertificatesPage />
+                      </Suspense>
+                    }
+                  />
+                  <Route path="/reports" element={<Navigate to="/management" replace />} />
+                  <Route path="/notifications" element={<Navigate to="/management" replace />} />
+                  <Route
+                    path="/users"
+                    element={
+                      <Suspense fallback={routeFallback}>
+                        <UsersPage />
+                      </Suspense>
+                    }
+                  />
+                </Route>
+              </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </BrowserRouter>
+        </ConfirmationProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

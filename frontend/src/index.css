@@ -5,28 +5,12 @@
 @tailwind utilities;
 
 :root {
-  color: #16302b;
-  background-color: #f4faf8;
+  --bg-app: #f4faf8;
+  --text-main: #16302b;
+  --card-bg: #ffffff;
+  --card-border: rgba(28, 104, 93, 0.1);
   --font-display: 'Poppins', sans-serif;
   --font-body: 'Source Sans 3', sans-serif;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-  font-family: var(--font-body);
-  line-height: 1.5;
-  background:
-    radial-gradient(circle at 10% 10%, rgba(119, 216, 196, 0.3), transparent 40%),
-    radial-gradient(circle at 80% 0%, rgba(255, 216, 151, 0.25), transparent 45%),
-    #f4faf8;
-  color: #16302b;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -64,7 +48,11 @@ input[type='time'] {
 }
 
 .card {
-  @apply rounded-2xl border border-primary-100 bg-white p-4 shadow-soft;
+  @apply rounded-2xl border border-primary-100 bg-white p-4 shadow-soft dark:border-white/10 dark:bg-slate-800/50 dark:backdrop-blur-md;
+}
+
+.glass-panel {
+  @apply rounded-2xl border border-white/20 bg-white/70 shadow-xl backdrop-blur-lg dark:border-white/10 dark:bg-slate-900/40;
 }
 
 .page-tabs {

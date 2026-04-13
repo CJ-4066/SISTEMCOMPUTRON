@@ -1,5 +1,7 @@
 const express = require('express');
 const { z } = require('zod');
+const crypto = require('crypto');
+const QRCode = require('qrcode');
 const { query } = require('../config/db');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
@@ -79,6 +81,72 @@ const certificateCreateSchema = z.object({
   params: z.object({}).optional(),
   query: z.object({}).optional(),
 });
+
+// PUBLIC ROUTES (Must be defined before router.use(authenticate))
+
+router.get(
+  '/verify/:token',
+  asyncHandler(async (req, res) => {
+    const token = req.params.token;
+    if (!token) throw new ApiError(400, 'Token de validación requerido');
+
+    const result = await query(
+      `SELECT
+         certificate_code,
+         student_name,
+         student_document,
+         course_name,
+         hours_academic,
+         modality,
+         start_date,
+         end_date,
+         issue_date,
+         city,
+         organization
+       FROM certificate_library
+       WHERE validation_token = $1
+       LIMIT 1`,
+      [token],
+    );
+
+    if (result.rowCount === 0) {
+      throw new ApiError(404, 'Certificado no encontrado o token inválido');
+    }
+
+    return res.json({ item: result.rows[0] });
+  }),
+);
+
+router.get(
+  '/verify/:token/qr',
+  asyncHandler(async (req, res) => {
+    const token = req.params.token;
+    if (!token) throw new ApiError(400, 'Token requerido');
+
+    // To prevent scraping or generating QR for invalid tokens, we could verify existence,
+    // but building the QR locally is fast and harmless. 
+    // We will return the QR image for the frontend verification URL.
+    
+    // Front-end URL structure: Protocol + Host + /verificar/[token]
+    // Since we don't know the exact host here, the front-end might generate it directly,
+    // or we can pass a URL parameter "frontend_host" if needed.
+    // However, since we are returning an image, the safest is to generate the URL
+    // assuming it runs on the origin that requests it. Wait, the frontend can just
+    // use a canvas library to generate it! Let's provide this endpoint anyway.
+    
+    // Defaulting to the domain where it's deployed or the request origin
+    const host = req.get('Origin') || req.get('Referer') || (`${req.protocol}://${req.get('host')}`);
+    const verificationUrl = `${host}/verificar/${token}`;
+
+    try {
+      const qrImageBuffer = await QRCode.toBuffer(verificationUrl, { type: 'png', margin: 1, width: 300 });
+      res.type('image/png');
+      return res.send(qrImageBuffer);
+    } catch (e) {
+      throw new ApiError(500, 'No se pudo generar el código QR');
+    }
+  }),
+);
 
 router.use(authenticate);
 
@@ -289,6 +357,8 @@ router.post(
       }
     }
 
+    const validationToken = crypto.randomBytes(16).toString('hex');
+
     const insertResult = await query(
       `INSERT INTO certificate_library (
          certificate_code,
@@ -303,10 +373,11 @@ router.post(
          city,
          organization,
          campus_id,
+         validation_token,
          created_by
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING id, certificate_code, student_name, student_document, course_name, hours_academic, modality, start_date, end_date, issue_date, city, organization, campus_id, created_by, created_at`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING id, certificate_code, student_name, student_document, course_name, hours_academic, modality, start_date, end_date, issue_date, city, organization, campus_id, validation_token, created_by, created_at`,
       [
         payload.certificate_code || null,
         payload.student_name.trim(),
@@ -320,6 +391,7 @@ router.post(
         payload.city || selectedEnrollment?.campus_city || null,
         payload.organization || null,
         campusId,
+        validationToken,
         req.user.id,
       ],
     );

@@ -951,9 +951,16 @@ const ensureCertificateLibraryTable = async () => {
       city VARCHAR(120),
       organization VARCHAR(180),
       campus_id BIGINT REFERENCES campuses(id) ON DELETE SET NULL,
+      validation_token VARCHAR(64) UNIQUE,
       created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+
+  await query(`ALTER TABLE certificate_library ADD COLUMN IF NOT EXISTS validation_token VARCHAR(64) UNIQUE`);
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_certificate_library_token
+    ON certificate_library(validation_token)
   `);
 
   await query(`

@@ -1,4 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { formatCurrency, formatShortDate } from './dashboardUtils';
 
 export default function PaymentsTrendCard({
@@ -48,43 +57,69 @@ export default function PaymentsTrendCard({
         <p className="text-sm text-primary-700">{emptyMessage}</p>
       ) : (
         <div className="space-y-4">
-          <div className="overflow-x-auto pb-2">
-            <div className="flex h-56 min-w-[32rem] items-end gap-3 sm:h-64 sm:min-w-0">
-              {items.map((item, index) => {
-                const amount = Number(item.completed_amount || 0);
-                const height = maxAmount > 0 ? Math.max(14, (amount / maxAmount) * 100) : 14;
-                const isActive = index === activeIndex;
-
-                return (
-                  <button
-                    key={`${item.payment_date}-${index}`}
-                    type="button"
-                    onMouseEnter={() => setActiveIndex(index)}
-                    onFocus={() => setActiveIndex(index)}
-                    onClick={() => setActiveIndex(index)}
-                    className="flex h-full min-w-[3.5rem] flex-1 flex-col justify-end gap-2"
-                  >
-                    <div
-                      className={`relative rounded-t-3xl transition-all ${
-                        isActive ? 'bg-primary-700 shadow-soft' : 'bg-primary-200 hover:bg-primary-300'
-                      }`}
-                      style={{ height: `${height}%` }}
-                    >
-                      <span className="absolute -top-6 left-1/2 hidden -translate-x-1/2 text-[11px] font-semibold text-primary-700 sm:block">
-                        {amount > 0 && isActive ? formatCurrency(amount) : ''}
-                      </span>
-                    </div>
-                    <span
-                      className={`text-center text-xs font-semibold ${
-                        isActive ? 'text-primary-900' : 'text-primary-600'
-                      }`}
-                    >
-                      {formatShortDate(item.payment_date)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart
+                data={items}
+                margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                onMouseMove={(state) => {
+                  if (state.activeTooltipIndex !== undefined) {
+                    setActiveIndex(state.activeTooltipIndex);
+                  }
+                }}
+              >
+                <defs>
+                  <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2ca38f" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#2ca38f" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis
+                  dataKey="payment_date"
+                  tickFormatter={formatShortDate}
+                  stroke="#94a3b8"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="#94a3b8"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(value) => `S/${value}`}
+                />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      return (
+                        <div className="rounded-xl border border-primary-100 bg-white p-3 shadow-xl dark:border-white/10 dark:bg-slate-800">
+                          <p className="text-xs font-semibold text-primary-500">
+                            {formatShortDate(payload[0].payload.payment_date)}
+                          </p>
+                          <p className="text-sm font-bold text-primary-900 dark:text-white">
+                            {formatCurrency(payload[0].value)}
+                          </p>
+                          <p className="text-[10px] text-primary-600">
+                            {payload[0].payload.total} transacciones
+                          </p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="completed_amount"
+                  stroke="#1c685d"
+                  strokeWidth={3}
+                  fillOpacity={1}
+                  fill="url(#colorAmount)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
 
           <div className="grid gap-2 md:grid-cols-3">

@@ -41,6 +41,9 @@ export default function UsersPage() {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [exportingUsers, setExportingUsers] = useState(false);
   const [statusUpdatingUserId, setStatusUpdatingUserId] = useState(null);
+  const [deletingUserId, setDeletingUserId] = useState(null);
+  const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
 
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [createUserForm, setCreateUserForm] = useState(createNewUserForm());
@@ -132,6 +135,7 @@ export default function UsersPage() {
 
         setUsers(items);
         setUserTotal(total);
+        setSelectedUserIds([]);
       } catch (requestError) {
         setError(requestError.response?.data?.message || 'No se pudieron cargar los usuarios.');
       } finally {
@@ -140,6 +144,48 @@ export default function UsersPage() {
     },
     [canViewUsers, userPage, userRoleFilter, userSearch],
   );
+
+  const sortedUsers = useMemo(() => {
+    if (!sortConfig.key) return users;
+    const sorted = [...users].sort((a, b) => {
+      const aValue = a[sortConfig.key];
+      const bValue = b[sortConfig.key];
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [users, sortConfig]);
+
+  const toggleSelectUser = useCallback((userId) => {
+    setSelectedUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
+    );
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedUserIds((prev) =>
+      prev.length === users.length ? [] : users.map((u) => u.id).filter((id) => id !== 1),
+    );
+  }, [users]);
+
+  const deleteSelectedUsers = async () => {
+    if (!canManageStatus || selectedUserIds.length === 0) return;
+    if (!window.confirm(`¿Estás seguro de eliminar ${selectedUserIds.length} usuarios seleccionados?`)) return;
+
+    setLoadingUsers(true);
+    resetFeedback();
+    try {
+      await Promise.all(selectedUserIds.map((id) => api.delete(`/users/${id}`)));
+      setMessage(`${selectedUserIds.length} usuarios eliminados correctamente.`);
+      await loadUsers();
+    } catch {
+      setError('Hubo un error eliminando algunos usuarios. Es posible que tengan registros dependientes.');
+      await loadUsers();
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
 
   const loadCredentialAccess = useCallback(
     async (targetUserId) => {
@@ -316,13 +362,33 @@ export default function UsersPage() {
     }
   };
 
+  const deleteUser = async (targetUser) => {
+    if (!canManageStatus) return;
+
+    if (!window.confirm(`¿Estás seguro de que deseas eliminar permanentemente a ${targetUser.first_name} ${targetUser.last_name}? Esta acción no se puede deshacer y fallará si el usuario tiene registros dependientes.`)) {
+      return;
+    }
+
+    resetFeedback();
+    setDeletingUserId(targetUser.id);
+
+    try {
+      const response = await api.delete(`/users/${targetUser.id}`);
+      setMessage(response.data?.message || 'Usuario eliminado permanentemente.');
+      await loadUsers();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'No se pudo eliminar el usuario.');
+    } finally {
+      setDeletingUserId(null);
+    }
+  };
+
   const openCreateUserModal = () => {
     if (!canCreateUsers) return;
 
     resetFeedback();
     setShowCreateUserModal(true);
     setCreateUserForm(createNewUserForm());
-    setShowCreatePassword(false);
     setCreateAccessPermissions(canConfigureCreateAccess ? getRolePermissionTemplate(DEFAULT_CREATE_ROLE) : []);
     setCreateAccessMenuLevel('MAIN');
 
@@ -341,7 +407,6 @@ export default function UsersPage() {
   const openCredentialEditor = (targetUser) => {
     setEditingCredentialUser(targetUser);
     setCredentialForm(createCredentialForm(targetUser));
-    setShowPassword(false);
     resetCredentialAccessState();
     resetFeedback();
 
@@ -353,7 +418,6 @@ export default function UsersPage() {
   const closeCredentialEditor = useCallback(() => {
     setEditingCredentialUser(null);
     setCredentialForm({ ...INITIAL_CREDENTIAL_FORM });
-    setShowPassword(false);
     resetCredentialAccessState();
   }, [resetCredentialAccessState]);
 
@@ -536,7 +600,7 @@ export default function UsersPage() {
           closeCreateUserModal();
           setError(
             accessError.response?.data?.message ||
-              'El usuario fue creado, pero no se pudieron guardar las vistas personalizadas.',
+            'El usuario fue creado, pero no se pudieron guardar las vistas personalizadas.',
           );
           await loadUsers();
           return;
@@ -686,7 +750,7 @@ export default function UsersPage() {
       {error ? <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
 
       <UsersListCard
-        users={users}
+        users={sortedUsers}
         userTotal={userTotal}
         userPage={userPage}
         userTotalPages={userTotalPages}
@@ -708,6 +772,14 @@ export default function UsersPage() {
         onOpenCredentialEditor={openCredentialEditor}
         canOpenEditor={canOpenEditor}
         showReadOnlyNote={!canManageStatus && !canManagePermissions && !canCreateUsers}
+        onDeleteUser={deleteUser}
+        deletingUserId={deletingUserId}
+        selectedUserIds={selectedUserIds}
+        onToggleSelectUser={toggleSelectUser}
+        onToggleSelectAll={toggleSelectAll}
+        onDeleteSelected={deleteSelectedUsers}
+        sortConfig={sortConfig}
+        onSort={setSortConfig}
       />
 
       <UserCreateModal

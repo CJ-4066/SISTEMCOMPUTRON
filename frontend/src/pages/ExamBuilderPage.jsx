@@ -346,19 +346,19 @@ export default function ExamBuilderPage() {
       {loadingAssignment ? <p className="text-sm text-primary-700">Cargando salon...</p> : null}
 
       {assignment ? (
-        <article className="card overflow-hidden p-0">
-          <div className="bg-gradient-to-r from-primary-950 via-primary-900 to-primary-800 px-5 py-6 text-white md:px-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
+        <article className="card overflow-hidden p-0 border-primary-200">
+          <div className="bg-gradient-to-r from-primary-50 to-white px-5 py-6 md:px-6 relative shadow-inner">
+            <div className="flex flex-wrap items-start justify-between gap-4 relative z-10">
               <div className="space-y-3">
-                <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary-100">
+                <div className="inline-flex items-center gap-2 rounded-full bg-primary-100 px-3 py-1 text-xs font-extrabold uppercase tracking-[0.18em] text-primary-800 shadow-sm border border-primary-200">
                   <FileQuestion className="h-3.5 w-3.5" />
                   <span>Constructor de examen</span>
                 </div>
                 <div>
-                  <h1 className="text-3xl font-semibold tracking-tight text-white md:text-4xl">
+                  <h1 className="text-3xl font-black tracking-tight text-primary-900 md:text-4xl">
                     {assignment.course_name}
                   </h1>
-                  <p className="mt-2 max-w-3xl text-sm text-primary-100 md:text-base">
+                  <p className="mt-2 max-w-3xl text-sm font-semibold text-primary-700 md:text-base">
                     Crea el examen en una sola pantalla: define el título, programa la disponibilidad y agrega todas las
                     preguntas con opciones de la A a la E e imágenes por pregunta.
                   </p>
@@ -369,7 +369,7 @@ export default function ExamBuilderPage() {
                 {createdPractice?.id ? (
                   <Link
                     to={`/courses/salon/${assignment.assignment_id}`}
-                    className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
+                    className="inline-flex items-center gap-2 rounded-xl border border-primary-200 bg-white px-4 py-2 text-sm font-bold text-primary-700 transition hover:bg-primary-50 shadow-sm hover:shadow"
                   >
                     <ExternalLink className="h-4 w-4" />
                     <span>Volver al salón</span>
@@ -377,7 +377,7 @@ export default function ExamBuilderPage() {
                 ) : null}
                 <Link
                   to={`/courses/salon/${assignment.assignment_id}`}
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
+                  className="inline-flex items-center gap-2 rounded-xl border border-primary-200 bg-white px-4 py-2 text-sm font-bold text-primary-700 transition hover:bg-primary-50 shadow-sm hover:shadow"
                 >
                   <ArrowLeft className="h-4 w-4" />
                   <span>Volver al salón</span>
@@ -385,22 +385,22 @@ export default function ExamBuilderPage() {
               </div>
             </div>
 
-            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4 relative z-10">
               {summaryCards.map((item) => {
                 const Icon = item.icon;
                 return (
-                  <div key={item.key} className="rounded-2xl border border-white/10 bg-white/8 p-4 backdrop-blur-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-200">
-                          {item.label}
-                        </p>
-                        <p className="mt-2 text-lg font-semibold text-white">{item.value}</p>
-                        <p className="mt-1 text-xs text-primary-200">{item.helper}</p>
-                      </div>
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/12 text-white">
-                        <Icon className="h-5 w-5" />
+                  <div key={item.key} className="flex flex-col h-full rounded-2xl border border-primary-200 bg-white p-5 transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <p className="text-[12px] font-extrabold uppercase tracking-[0.16em] text-primary-600">
+                        {item.label}
+                      </p>
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-700 shadow-sm border border-primary-100">
+                        <Icon className="h-6 w-6" />
                       </span>
+                    </div>
+                    <div className="mt-auto">
+                      <p className="text-3xl font-black text-primary-900 leading-none">{item.value}</p>
+                      <p className="mt-2 text-[13px] font-bold text-primary-600 leading-snug">{item.helper}</p>
                     </div>
                   </div>
                 );

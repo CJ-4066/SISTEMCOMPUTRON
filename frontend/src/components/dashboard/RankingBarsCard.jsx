@@ -1,3 +1,4 @@
+import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell } from 'recharts';
 import { useEffect, useMemo, useState } from 'react';
 import { formatCurrency } from './dashboardUtils';
 
@@ -33,41 +34,58 @@ export default function RankingBarsCard({
       {!items.length ? (
         <p className="text-sm text-primary-700">{emptyMessage}</p>
       ) : (
-        <div className="space-y-3">
-          {items.map((item, index) => {
-            const value = Number(item.pending_amount || 0);
-            const width = maxValue > 0 ? Math.max(12, (value / maxValue) * 100) : 12;
-            const isActive = index === activeIndex;
-
-            return (
-              <button
-                key={item.campus_id || item.campus_name}
-                type="button"
-                onMouseEnter={() => setActiveIndex(index)}
-                onFocus={() => setActiveIndex(index)}
-                onClick={() => setActiveIndex(index)}
-                className={`w-full rounded-2xl border p-3 text-left transition ${
-                  isActive
-                    ? 'border-accent-300 bg-accent-50'
-                    : 'border-primary-200 bg-white hover:border-primary-300 hover:bg-primary-50/40'
-                }`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-primary-900">{item.campus_name}</p>
-                    <p className="text-xs text-primary-600">{Number(item.installments || 0)} cuota(s) vencida(s)</p>
-                  </div>
-                  <span className="text-sm font-semibold text-accent-900">{formatCurrency(value)}</span>
-                </div>
-                <div className="mt-3 h-3 rounded-full bg-primary-100">
-                  <div
-                    className={`h-full rounded-full transition-all ${isActive ? 'bg-accent-500' : 'bg-primary-500'}`}
-                    style={{ width: `${width}%` }}
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={items}
+              layout="vertical"
+              margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+              onMouseMove={(state) => {
+                if (state.activeTooltipIndex !== undefined) {
+                  setActiveIndex(state.activeTooltipIndex);
+                }
+              }}
+            >
+              <XAxis type="number" hide />
+              <YAxis
+                dataKey="campus_name"
+                type="category"
+                stroke="#94a3b8"
+                fontSize={12}
+                tickLine={false}
+                axisLine={false}
+                width={100}
+              />
+              <Tooltip
+                cursor={{ fill: 'transparent' }}
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="rounded-xl border border-primary-100 bg-white p-3 shadow-xl dark:border-white/10 dark:bg-slate-800">
+                        <p className="text-xs font-semibold text-primary-500">{payload[0].payload.campus_name}</p>
+                        <p className="text-sm font-bold text-accent-700">
+                          {formatCurrency(payload[0].value)}
+                        </p>
+                        <p className="text-[10px] text-primary-600">
+                          {payload[0].payload.installments} cuotas vencidas
+                        </p>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Bar dataKey="pending_amount" radius={[0, 10, 10, 0]} barSize={20}>
+                {items.map((entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={index === activeIndex ? '#f98617' : '#2ca38f'}
+                    className="transition-all duration-300"
                   />
-                </div>
-              </button>
-            );
-          })}
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       )}
     </article>

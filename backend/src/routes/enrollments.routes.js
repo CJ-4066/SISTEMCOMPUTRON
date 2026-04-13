@@ -87,6 +87,45 @@ router.get(
   }),
 );
 
+router.get(
+  '/recent',
+  authorizePermission('enrollments.view'),
+  asyncHandler(async (req, res) => {
+    const campusScopeId = parseCampusScopeId(req);
+    const limit = Number(req.query.limit) || 10;
+    
+    const { rows } = await query(
+      `SELECT
+        e.id,
+        e.student_id,
+        CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+        e.course_campus_id,
+        c.name AS course_name,
+        cp.name AS campus_name,
+        e.period_id,
+        p.name AS period_name,
+        e.status,
+        e.enrollment_date,
+        e.created_at,
+        e.created_by,
+        TRIM(CONCAT(COALESCE(u.first_name, ''), CASE WHEN u.last_name IS NULL OR u.last_name = '' THEN '' ELSE ' ' END, COALESCE(u.last_name, ''))) AS created_by_name
+      FROM enrollments e
+      JOIN students s ON s.id = e.student_id
+      JOIN course_campus cc ON cc.id = e.course_campus_id
+      JOIN courses c ON c.id = cc.course_id
+      JOIN campuses cp ON cp.id = cc.campus_id
+      JOIN academic_periods p ON p.id = e.period_id
+      LEFT JOIN users u ON u.id = e.created_by
+      WHERE ($1::bigint IS NULL OR cc.campus_id = $1)
+      ORDER BY e.created_at DESC
+      LIMIT $2`,
+      [campusScopeId, limit],
+    );
+
+    return res.json({ items: rows });
+  }),
+);
+
 router.post(
   '/',
   authorizePermission('enrollments.manage'),

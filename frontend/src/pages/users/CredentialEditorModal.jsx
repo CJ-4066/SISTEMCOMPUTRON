@@ -74,20 +74,61 @@ export default function CredentialEditorModal({
         aria-label="Editar acceso y datos del usuario"
         className="relative z-10 w-full max-w-5xl rounded-2xl border border-primary-100 bg-white p-4 shadow-2xl md:p-6"
       >
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-primary-900">Editar acceso y datos</h2>
-            <p className="text-sm text-primary-700">
-              {editingCredentialUser.first_name} {editingCredentialUser.last_name}
-            </p>
+        <div className="mb-4 flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
+          <div className="flex items-center gap-4 text-left">
+            <div className="relative group">
+              <div className="h-16 w-16 overflow-hidden rounded-full border-2 border-primary-200 bg-primary-100 dark:border-white/10 dark:bg-slate-700">
+                {credentialForm.avatar_url ? (
+                  <img
+                    src={credentialForm.avatar_url}
+                    alt="Avatar"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-xl font-bold text-primary-400">
+                    {editingCredentialUser.first_name[0]}
+                    {editingCredentialUser.last_name[0]}
+                  </div>
+                )}
+              </div>
+              <label className="absolute inset-0 flex cursor-pointer items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                        onCredentialFieldChange('avatar_url', reader.result);
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                />
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6 text-white">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                  <circle cx="12" cy="13" r="4" />
+                </svg>
+              </label>
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-primary-900 dark:text-white">
+                {editingCredentialUser.first_name} {editingCredentialUser.last_name}
+              </h2>
+              <p className="text-sm text-primary-600 dark:text-primary-400">
+                ID de usuario: {editingCredentialUser.id} • {getPrimaryRole(editingCredentialUser.roles)}
+              </p>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={savingCredentials}
-            className="rounded-lg border border-primary-200 px-3 py-1 text-sm text-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-xl border border-primary-200 px-4 py-2 text-sm font-semibold text-primary-700 hover:bg-primary-50 dark:border-white/10 dark:text-primary-200 dark:hover:bg-slate-800"
           >
-            Cerrar
+            Cerrar edición
           </button>
         </div>
 

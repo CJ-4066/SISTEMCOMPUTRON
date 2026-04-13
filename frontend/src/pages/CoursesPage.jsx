@@ -171,9 +171,9 @@ export default function CoursesPage() {
 
       {error ? <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
 
-      <div className="space-y-4">
+      <div className="space-y-6">
         <article className="card">
-          <h2 className="text-lg font-semibold text-primary-900">Catalogo de cursos</h2>
+          <h2 className="text-lg font-semibold text-primary-900">Catálogo de Cursos</h2>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <input
               className="app-input lg:col-span-2"
@@ -224,54 +224,71 @@ export default function CoursesPage() {
           </p>
         </article>
 
-        <article className="card overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="text-left text-primary-600">
-                <th className="pb-2 pr-3">Curso</th>
-                <th className="pb-2 pr-3">Duracion</th>
-                <th className="pb-2 pr-3">Nota minima</th>
-                <th className="pb-2">Ofertas</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredCatalogCourses.map((course) => (
-                <tr key={course.id} className="border-t border-primary-100 align-top">
-                  <td className="py-2 pr-3">
-                    <p className="font-medium">{course.name}</p>
-                    <p className="text-xs text-primary-600">{course.description || 'Sin descripcion'}</p>
-                  </td>
-                  <td className="py-2 pr-3">{course.duration_hours} horas</td>
-                  <td className="py-2 pr-3">{Number(course.passing_grade).toFixed(2)}</td>
-                  <td className="py-2">
-                    {course.offerings?.length ? (
-                      <ul className="space-y-1">
-                        {course.offerings.map((offering) => (
-                          <li key={offering.offering_id} className="rounded-lg bg-primary-50 px-2 py-1">
-                            <p>
-                              {offering.campus_name} ({modalityLabels[offering.modality] || offering.modality}) -{' '}
-                              {formatCurrency(offering.monthly_fee)}
-                            </p>
-                            <p className="text-xs text-primary-600">Horario: {offering.schedule_info || '-'}</p>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      'Sin ofertas registradas'
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {!loading && filteredCatalogCourses.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="py-6 text-center text-sm text-primary-700">
-                    No hay cursos que coincidan con los filtros actuales.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </article>
+        {!loading && filteredCatalogCourses.length === 0 ? (
+           <div className="py-12 text-center text-sm font-medium text-primary-700 bg-white rounded-2xl border border-dashed border-primary-200">
+             No hay cursos que coincidan con los filtros actuales.
+           </div>
+        ) : (
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            {filteredCatalogCourses.map((course) => (
+              <div 
+                 key={course.id} 
+                 className="flex flex-col rounded-2xl border border-primary-100 bg-white p-5 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg hover:border-primary-300"
+              >
+                <div className="mb-4">
+                  <h3 className="font-bold text-primary-900 text-[17px] leading-snug line-clamp-2" title={course.name}>{course.name}</h3>
+                  <p className="text-xs text-primary-600/80 mt-1.5 line-clamp-3 leading-relaxed" title={course.description || 'Sin descripción'}>{course.description || 'Sin descripción'}</p>
+                </div>
+                
+                <div className="flex items-center justify-between gap-2 text-xs text-gray-600 mb-5 bg-primary-50/50 p-2.5 rounded-xl border border-primary-100/30">
+                   <div className="flex flex-col flex-1 items-center">
+                      <span className="font-bold text-primary-400 uppercase tracking-wider" style={{fontSize: '9px'}}>Duración</span>
+                      <span className="font-semibold text-primary-900 mt-0.5">{course.duration_hours} <span className="text-[10px] text-primary-600">hrs</span></span>
+                   </div>
+                   <div className="w-[1px] h-8 bg-primary-200/50"></div>
+                   <div className="flex flex-col flex-1 items-center">
+                      <span className="font-bold text-primary-400 uppercase tracking-wider" style={{fontSize: '9px'}}>Nota Min.</span>
+                      <span className="font-semibold text-primary-900 mt-0.5">{Number(course.passing_grade).toFixed(1)}</span>
+                   </div>
+                   <div className="w-[1px] h-8 bg-primary-200/50"></div>
+                   <div className="flex flex-col flex-1 items-center">
+                      <span className="font-bold text-primary-400 uppercase tracking-wider" style={{fontSize: '9px'}}>Ofertas</span>
+                      <span className="font-semibold text-primary-900 mt-0.5">{course.offerings?.length || 0}</span>
+                   </div>
+                </div>
+
+                <div className="mt-auto pt-4 border-t border-gray-100">
+                  <span className="text-[10px] uppercase font-bold text-gray-400 mb-2.5 block tracking-wider">Disponibilidad de Sedes</span>
+                  {course.offerings?.length ? (
+                    <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
+                      {course.offerings.map((offering) => (
+                        <div key={offering.offering_id} className="rounded-xl bg-primary-50/80 px-3 py-2.5 border border-primary-100/50 transition-colors hover:bg-primary-100/50">
+                          <div className="flex justify-between items-start mb-1 gap-2">
+                             <p className="font-bold text-primary-900 text-xs truncate">
+                               {offering.campus_name}
+                             </p>
+                             <span className="inline-flex bg-white shadow-sm border border-primary-100 text-primary-800 px-1.5 py-0.5 rounded-md text-[10px] font-bold shrink-0">
+                               {formatCurrency(offering.monthly_fee)}
+                             </span>
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                             <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide">MOD. {modalityLabels[offering.modality] || offering.modality}</span>
+                             <span className="text-[10px] text-primary-600/80 truncate font-medium" title={offering.schedule_info || '-'}>{offering.schedule_info || '-'}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="py-2 inline-flex gap-2 items-center">
+                       <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+                       <span className="text-xs text-gray-500 font-medium italic">Sin ofertas registradas</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

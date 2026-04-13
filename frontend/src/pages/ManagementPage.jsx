@@ -2,6 +2,8 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useState, useTransit
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useConfirmation } from '../context/ConfirmationContext';
+import { toast } from 'sonner';
 import { MANAGEMENT_SECTION_ITEMS } from '../constants/managementSections';
 import { PERMISSIONS } from '../constants/permissions';
 import { calculateAgeFromBirthDate, formatAgeLabel } from '../utils/age';
@@ -9,6 +11,7 @@ import { buildDocumentValue, DOCUMENT_TYPE_OPTIONS, parseDocumentValue } from '.
 import PaginationControls from '../components/PaginationControls';
 import CertificateGeneratorLauncher from '../components/certificates/CertificateGeneratorLauncher';
 import PaymentsPage from './PaymentsPage';
+import TransfersManager from './transfers/TransfersManager';
 
 const createStudentDefaults = () => ({
   first_name: '',
@@ -75,7 +78,7 @@ const createPeriodDefaults = () => ({
   end_date: getTodayIsoDate(),
 });
 
-const courseDefaults = {
+const createCourseDefaults = () => ({
   offering_id: '',
   name: '',
   description: '',
@@ -87,12 +90,10 @@ const courseDefaults = {
   teacher_user_id: '',
   allow_without_teacher: false,
   modality: 'PRESENCIAL',
-  schedule_days: ['LUN'],
-  schedule_start: '18:00',
-  schedule_end: '20:00',
+  schedules: [{ id: Date.now(), days: ['LUN'], start: '18:00', end: '20:00' }],
   monthly_fee: '',
   capacity: '',
-};
+});
 
 const COURSE_DAY_OPTIONS = [
   { value: 'LUN', label: 'LUN' },
@@ -179,6 +180,24 @@ const parseScheduleRange = (scheduleInfo) => {
   };
 };
 
+const parseCourseSchedule = (scheduleInfo) => {
+  const parts = String(scheduleInfo || '').split('|').map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) {
+    return [{ id: Date.now(), days: ['LUN'], start: '18:00', end: '20:00' }];
+  }
+
+  return parts.map((part, index) => {
+    const days = parseScheduleDays(part);
+    const range = parseScheduleRange(part);
+    return {
+      id: Date.now() + index,
+      days: days.length ? days : ['LUN'],
+      start: range.start,
+      end: range.end,
+    };
+  });
+};
+
 const parseScheduleDays = (scheduleInfo) => {
   const tokenMap = {
     LUN: 'LUN',
@@ -213,9 +232,15 @@ const parseScheduleDays = (scheduleInfo) => {
   return COURSE_DAY_OPTIONS.map((day) => day.value).filter((day) => found.has(day));
 };
 
-const getCourseScheduleInfo = (days, start, end) => {
-  const orderedDays = COURSE_DAY_OPTIONS.map((day) => day.value).filter((day) => (days || []).includes(day));
-  return `${orderedDays.join(', ')} ${start}-${end}`;
+const getCourseScheduleInfo = (schedules) => {
+  if (!Array.isArray(schedules) || schedules.length === 0) return '';
+  
+  return schedules
+    .map((s) => {
+      const orderedDays = COURSE_DAY_OPTIONS.map((day) => day.value).filter((day) => (s.days || []).includes(day));
+      return `${orderedDays.join(', ')} ${s.start}-${s.end}`;
+    })
+    .join(' | ');
 };
 
 const timeToMinutes = (value) => {
@@ -226,6 +251,7 @@ const timeToMinutes = (value) => {
 
 export default function ManagementPage() {
   const { user, hasPermission } = useAuth();
+  const { confirm } = useConfirmation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -328,7 +354,7 @@ export default function ManagementPage() {
 
   const [studentForm, setStudentForm] = useState(createStudentDefaults);
   const [teacherForm, setTeacherForm] = useState(createTeacherFormDefaults);
-  const [courseForm, setCourseForm] = useState(courseDefaults);
+  const [courseForm, setCourseForm] = useState(createCourseDefaults);
   const [campusForm, setCampusForm] = useState(campusDefaults);
   const [periodForm, setPeriodForm] = useState(createPeriodDefaults);
 
@@ -364,8 +390,6 @@ export default function ManagementPage() {
   const [loadingCampuses, setLoadingCampuses] = useState(false);
   const [loadingEnrollments, setLoadingEnrollments] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
   const [hasFullTeacherAssignmentsLoaded, setHasFullTeacherAssignmentsLoaded] = useState(false);
   const [teacherAssignmentsScopeKey, setTeacherAssignmentsScopeKey] = useState('');
   const studentTotalPages = Math.max(1, Math.ceil(studentTotal / STUDENT_PAGE_SIZE));
@@ -374,11 +398,6 @@ export default function ManagementPage() {
   const changeTab = useCallback(
     (nextTab, { replace = false } = {}) => {
       const resolvedTab = resolveTabKey(nextTab);
-      if (resolvedTab === 'transfers') {
-        navigate('/students?tab=transfers');
-        return;
-      }
-
       startTabTransition(() => setActiveTab(resolvedTab));
 
       const nextParams = new URLSearchParams(searchParams);
@@ -394,11 +413,6 @@ export default function ManagementPage() {
   );
 
   useEffect(() => {
-    if (requestedSection === 'transfers') {
-      navigate('/students?tab=transfers', { replace: true });
-      return;
-    }
-
     const resolvedTab = resolveTabKey(requestedSection);
 
     if (resolvedTab !== activeTab) {
@@ -453,7 +467,7 @@ export default function ManagementPage() {
         setStudents(items);
         setStudentTotal(total);
       } catch (requestError) {
-        setError(requestError.response?.data?.message || 'No se pudieron cargar los alumnos.');
+        toast.error(requestError.response?.data?.message || 'No se pudieron cargar los alumnos.');
       } finally {
         setLoadingStudents(false);
       }
@@ -469,11 +483,10 @@ export default function ManagementPage() {
 
     setLoadingEnrollments(true);
     try {
-      const response = await api.get('/enrollments');
-      const items = response.data?.items || [];
-      setRecentEnrollments(items.slice(0, ENROLLMENT_RECENT_LIMIT));
+      const response = await api.get('/enrollments/recent');
+      setRecentEnrollments(response.data?.items || []);
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudieron cargar las matrículas recientes.');
+      toast.error(requestError.response?.data?.message || 'No se pudieron cargar las matrículas recientes.');
     } finally {
       setLoadingEnrollments(false);
     }
@@ -522,7 +535,7 @@ export default function ManagementPage() {
         setTeacherTotal(total);
         setHasFullTeachersLoaded(!paginate);
       } catch (requestError) {
-        setError(requestError.response?.data?.message || 'No se pudieron cargar los docentes.');
+        toast.error(requestError.response?.data?.message || 'No se pudieron cargar los docentes.');
       } finally {
         setLoadingTeachers(false);
       }
@@ -573,7 +586,7 @@ export default function ManagementPage() {
         setHasFullCoursesLoaded(!search && !normalizedCampusId && !recentOnly && !normalizedPageSize);
         setCoursesScopeKey(scopeKey);
       } catch (requestError) {
-        setError(requestError.response?.data?.message || 'No se pudieron cargar los cursos.');
+        toast.error(requestError.response?.data?.message || 'No se pudieron cargar los cursos.');
       } finally {
         setLoadingCourses(false);
       }
@@ -589,16 +602,14 @@ export default function ManagementPage() {
 
     setLoadingCampuses(true);
     try {
-      const response = await api.get('/campuses', {
-        ...(canSelectTeacherCampus ? { _skipCampusScope: true } : {}),
-      });
+      const response = await api.get('/campuses');
       setCampuses(response.data?.items || []);
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudieron cargar las sedes.');
+      toast.error(requestError.response?.data?.message || 'No se pudieron cargar las sedes.');
     } finally {
       setLoadingCampuses(false);
     }
-  }, [canReadCampuses, canSelectTeacherCampus]);
+  }, [canReadCampuses]);
 
   const loadPeriods = useCallback(async () => {
     if (!canViewPeriods) {
@@ -610,7 +621,7 @@ export default function ManagementPage() {
       const response = await api.get('/catalogs/periods');
       setPeriods(response.data?.items || []);
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudieron cargar los periodos.');
+      toast.error(requestError.response?.data?.message || 'No se pudieron cargar los periodos.');
     }
   }, [canViewPeriods]);
 
@@ -676,7 +687,7 @@ export default function ManagementPage() {
         setTeacherAssignmentsScopeKey(scopeKey);
       } catch (requestError) {
         setTeacherAssignmentsScopeKey('');
-        setError(requestError.response?.data?.message || 'No se pudieron cargar las asignaciones docentes.');
+        toast.error(requestError.response?.data?.message || 'No se pudieron cargar las asignaciones docentes.');
       } finally {
         setLoadingTeacherAssignments(false);
       }
@@ -691,10 +702,10 @@ export default function ManagementPage() {
     }
 
     try {
-      const response = await api.get('/catalogs/payment-concepts');
+      const response = await api.get('/payments/concepts');
       setPaymentConcepts(response.data?.items || []);
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudieron cargar los conceptos de pago.');
+      toast.error(requestError.response?.data?.message || 'No se pudieron cargar los conceptos de pago.');
     }
   }, [canViewPaymentConcepts]);
 
@@ -1454,7 +1465,7 @@ export default function ManagementPage() {
 
   const resetCourseForm = () => {
     setCourseForm({
-      ...courseDefaults,
+      ...createCourseDefaults(),
       campus_id: defaultCampusId,
       period_id: defaultPeriodId,
     });
@@ -1481,8 +1492,6 @@ export default function ManagementPage() {
     if (!canManageStudents) return;
 
     setSaving(true);
-    setError('');
-    setMessage('');
 
     try {
       const payload = {
@@ -1520,7 +1529,7 @@ export default function ManagementPage() {
           }
         }
 
-        setMessage(updatedAccess ? 'Alumno y acceso actualizados correctamente.' : 'Alumno actualizado correctamente.');
+        toast.success(updatedAccess ? 'Alumno y acceso actualizados correctamente.' : 'Alumno actualizado correctamente.');
       } else {
         payload.no_guardian = Boolean(studentForm.no_guardian);
 
@@ -1677,10 +1686,10 @@ export default function ManagementPage() {
         }
 
         if (financeWarning) {
-          setError(financeWarning);
+          toast.error(financeWarning);
         }
 
-        setMessage(
+        toast.success(
           `Alumno creado correctamente${payload.no_guardian ? ' sin apoderado' : ''}.${
             generatedInstallments > 0 ? ` Se generaron ${generatedInstallments} cobro(s).` : ''
           }`,
@@ -1697,7 +1706,7 @@ export default function ManagementPage() {
         loadRecentEnrollments(),
       ]);
     } catch (requestError) {
-      setError(requestError.response?.data?.message || requestError.message || 'No se pudo guardar el alumno.');
+      toast.error(requestError.response?.data?.message || requestError.message || 'No se pudo guardar el alumno.');
     } finally {
       setSaving(false);
     }
@@ -1742,25 +1751,22 @@ export default function ManagementPage() {
 
   const deleteStudent = async (student) => {
     if (!canManageStudents) return;
-
-    const confirmed = window.confirm(`Se eliminará al alumno ${student.first_name} ${student.last_name}.`);
+    const confirmed = await confirm({
+      title: 'Eliminar alumno',
+      message: `¿Estás seguro de que deseas eliminar permanentemente a ${student.first_name} ${student.last_name}?`,
+      confirmText: 'Eliminar',
+      type: 'danger',
+    });
     if (!confirmed) return;
 
     setSaving(true);
-    setError('');
-    setMessage('');
-
     try {
       await api.delete(`/students/${student.id}`);
-      setMessage('Alumno eliminado correctamente.');
+      toast.success('Alumno eliminado correctamente.');
       if (editingStudentId === student.id) resetStudentForm();
-      await loadStudents({
-        search: studentSearch.trim(),
-        page: studentPage,
-        pageSize: STUDENT_PAGE_SIZE,
-      });
+      await loadStudents();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudo eliminar el alumno.');
+      toast.error(requestError.response?.data?.message || 'No se pudo eliminar al alumno.');
     } finally {
       setSaving(false);
     }
@@ -1787,8 +1793,6 @@ export default function ManagementPage() {
     if (!canCreateTeachers && !canManageTeacherProfile) return;
 
     setSaving(true);
-    setError('');
-    setMessage('');
 
     const normalizedEmail = teacherForm.email.trim().toLowerCase();
     const useEmailAsPassword = !editingTeacherId && Boolean(teacherForm.use_email_as_password);
@@ -1797,38 +1801,38 @@ export default function ManagementPage() {
       !editingTeacherId && canManageAssignments && Boolean(teacherForm.create_initial_assignment);
 
     if (useEmailAsPassword && normalizedEmail.length < 8) {
-      setError('El correo debe tener al menos 8 caracteres para usarlo como contraseña temporal.');
+      toast.error('El correo debe tener al menos 8 caracteres para usarlo como contraseña temporal.');
       setSaving(false);
       return;
     }
 
     if (!editingTeacherId && !useEmailAsPassword && teacherForm.password.trim().length < 8) {
-      setError('La contraseña del docente debe tener al menos 8 caracteres.');
+      toast.error('La contraseña del docente debe tener al menos 8 caracteres.');
       setSaving(false);
       return;
     }
 
     if (shouldCreateInitialAssignment) {
       if (!effectiveTeacherAssignmentCampusId) {
-        setError('Selecciona la sede donde el docente dictará su curso inicial.');
+        toast.error('Selecciona la sede donde el docente dictará su curso inicial.');
         setSaving(false);
         return;
       }
 
       if (!teacherForm.assignment_course_campus_id) {
-        setError('Selecciona el curso que dictará el docente.');
+        toast.error('Selecciona el curso que dictará el docente.');
         setSaving(false);
         return;
       }
 
       if (!teacherForm.assignment_period_id) {
-        setError('Selecciona el periodo académico de la asignación inicial.');
+        toast.error('Selecciona el periodo académico de la asignación inicial.');
         setSaving(false);
         return;
       }
 
       if (teacherAssignmentRequiresCampusOverrideReason && !teacherForm.assignment_campus_override_reason.trim()) {
-        setError('Indica el motivo si el curso inicial se dictará en una sede distinta a la sede base del docente.');
+        toast.error('Indica el motivo si el curso inicial se dictará en una sede distinta a la sede base del docente.');
         setSaving(false);
         return;
       }
@@ -1860,7 +1864,7 @@ export default function ManagementPage() {
           });
         }
 
-        setMessage('Docente actualizado correctamente.');
+        toast.success('Docente actualizado correctamente.');
       } else {
         await api.post('/auth/register', {
           first_name: teacherForm.first_name.trim(),
@@ -1886,7 +1890,7 @@ export default function ManagementPage() {
               }
             : {}),
         });
-        setMessage(
+        toast.success(
           shouldCreateInitialAssignment
             ? 'Docente y asignación inicial guardados correctamente.'
             : 'Docente creado correctamente.',
@@ -1901,7 +1905,7 @@ export default function ManagementPage() {
         paginate: true,
       });
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudo guardar el docente.');
+      toast.error(requestError.response?.data?.message || 'No se pudo guardar el docente.');
     } finally {
       setSaving(false);
     }
@@ -1932,28 +1936,24 @@ export default function ManagementPage() {
     setShowTeacherForm(true);
   };
 
-  const setTeacherStatus = async (teacher, isActive) => {
+  const setTeacherStatus = async (teacher, nextStatus) => {
     if (!canManageTeacherProfile) return;
-
-    const actionLabel = isActive ? 'activar' : 'eliminar';
-    const confirmed = window.confirm(`Se va a ${actionLabel} al docente ${teacher.first_name} ${teacher.last_name}.`);
+    const actionLabel = nextStatus ? 'activar' : 'desactivar';
+    const confirmed = await confirm({
+      title: `${nextStatus ? 'Activar' : 'Desactivar'} docente`,
+      message: `¿Estás seguro de que deseas ${actionLabel} al docente ${teacher.first_name} ${teacher.last_name}?`,
+      confirmText: nextStatus ? 'Activar' : 'Desactivar',
+      type: nextStatus ? 'primary' : 'warning',
+    });
     if (!confirmed) return;
 
     setSaving(true);
-    setError('');
-    setMessage('');
-
     try {
-      await api.patch(`/users/${teacher.id}/status`, { is_active: isActive });
-      setMessage(isActive ? 'Docente activado.' : 'Docente eliminado (desactivado).');
-      await loadTeachers({
-        search: deferredTeacherSearch.trim(),
-        page: teacherPage,
-        pageSize: teacherPageSize,
-        paginate: true,
-      });
+      await api.patch(`/teachers/${teacher.id}/status`, { is_active: nextStatus });
+      toast.success(`Docente ${nextStatus ? 'activado' : 'desactivado'} correctamente.`);
+      await loadTeachers();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudo actualizar el estado del docente.');
+      toast.error(requestError.response?.data?.message || `No se pudo ${actionLabel} al docente.`);
     } finally {
       setSaving(false);
     }
@@ -1964,9 +1964,6 @@ export default function ManagementPage() {
     if (!canManageCampuses) return;
 
     setSaving(true);
-    setError('');
-    setMessage('');
-
     try {
       const payload = {
         name: campusForm.name.trim(),
@@ -1978,19 +1975,19 @@ export default function ManagementPage() {
 
       if (editingCampusId) {
         await api.put(`/campuses/${editingCampusId}`, payload);
-        setMessage('Sede actualizada correctamente.');
+        toast.success('Sede actualizada correctamente.');
       } else {
         await api.post('/campuses', {
           ...payload,
           registration_date: campusForm.registration_date || getTodayIsoDate(),
         });
-        setMessage('Sede creada correctamente.');
+        toast.success('Sede creada correctamente.');
       }
 
       resetCampusForm();
       await loadCampuses();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudo guardar la sede.');
+      toast.error(requestError.response?.data?.message || 'No se pudo guardar la sede.');
     } finally {
       setSaving(false);
     }
@@ -2001,19 +1998,16 @@ export default function ManagementPage() {
     if (!canManagePeriods) return;
 
     setSaving(true);
-    setError('');
-    setMessage('');
-
     try {
       await api.post('/catalogs/periods', {
         ...periodForm,
         is_active: true,
       });
       resetPeriodForm();
-      setMessage('Periodo creado correctamente.');
+      toast.success('Periodo creado correctamente.');
       await loadPeriods();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudo guardar el periodo.');
+      toast.error(requestError.response?.data?.message || 'No se pudo guardar el periodo.');
     } finally {
       setSaving(false);
     }
@@ -2035,20 +2029,22 @@ export default function ManagementPage() {
 
   const deleteCampus = async (campus) => {
     if (!canManageCampuses) return;
-    const confirmed = window.confirm(`Se eliminará la sede ${campus.name}.`);
+    const confirmed = await confirm({
+      title: 'Eliminar sede',
+      message: `¿Estás seguro de que deseas eliminar la sede "${campus.name}"? Esta acción podría fallar si hay registros asociados.`,
+      confirmText: 'Eliminar',
+      type: 'danger',
+    });
     if (!confirmed) return;
 
     setSaving(true);
-    setError('');
-    setMessage('');
-
     try {
       await api.delete(`/campuses/${campus.id}`);
-      setMessage('Sede eliminada correctamente.');
+      toast.success('Sede eliminada correctamente.');
       if (editingCampusId === campus.id) resetCampusForm();
       await loadCampuses();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudo eliminar la sede.');
+      toast.error(requestError.response?.data?.message || 'No se pudo eliminar la sede.');
     } finally {
       setSaving(false);
     }
@@ -2059,19 +2055,22 @@ export default function ManagementPage() {
     if (!canManageCourses) return;
 
     setSaving(true);
-    setError('');
-    setMessage('');
 
     try {
       const allowWithoutTeacher = Boolean(courseForm.allow_without_teacher);
-      const startMinutes = timeToMinutes(courseForm.schedule_start);
-      const endMinutes = timeToMinutes(courseForm.schedule_end);
-      if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
-        throw new Error('El horario del curso no es válido. Revisa hora inicio y hora fin.');
+      if (!Array.isArray(courseForm.schedules) || courseForm.schedules.length === 0) {
+        throw new Error('Debes configurar al menos un horario para el curso.');
       }
 
-      if (!Array.isArray(courseForm.schedule_days) || courseForm.schedule_days.length === 0) {
-        throw new Error('Selecciona al menos un día para el horario del curso.');
+      for (const [index, schedule] of courseForm.schedules.entries()) {
+        const startMin = timeToMinutes(schedule.start);
+        const endMin = timeToMinutes(schedule.end);
+        if (startMin === null || endMin === null || endMin <= startMin) {
+          throw new Error(`El horario del Bloque #${index + 1} no es válido. Revisa hora inicio y hora fin.`);
+        }
+        if (!Array.isArray(schedule.days) || schedule.days.length === 0) {
+          throw new Error(`Selecciona al menos un día para el Bloque #${index + 1}.`);
+        }
       }
 
       if (!courseForm.campus_id) {
@@ -2092,11 +2091,7 @@ export default function ManagementPage() {
         throw new Error('Ingresa un importe válido para el curso.');
       }
 
-      const scheduleInfo = getCourseScheduleInfo(
-        courseForm.schedule_days,
-        courseForm.schedule_start,
-        courseForm.schedule_end,
-      );
+      const scheduleInfo = getCourseScheduleInfo(courseForm.schedules);
 
       const coursePayload = {
         name: courseForm.name.trim(),
@@ -2182,7 +2177,7 @@ export default function ManagementPage() {
       const currentVisibleOfferingIds = visibleCourseOfferingIds;
       const refreshCampusId = courseCampusFilter || courseForm.campus_id || null;
 
-      setMessage(
+      toast.success(
         editingCourseId
           ? allowWithoutTeacher
             ? 'Curso actualizado sin profesor asignado.'
@@ -2201,7 +2196,7 @@ export default function ManagementPage() {
         await loadTeacherAssignments({ full: false, courseCampusIds: currentVisibleOfferingIds });
       }
     } catch (requestError) {
-      setError(requestError.response?.data?.message || requestError.message || 'No se pudo guardar el curso.');
+      toast.error(requestError.response?.data?.message || requestError.message || 'No se pudo guardar el curso.');
     } finally {
       setSaving(false);
     }
@@ -2212,8 +2207,7 @@ export default function ManagementPage() {
     const offering = getPrimaryOffering(course);
     const assignment = offering ? assignmentByOfferingId.get(String(offering.offering_id)) : null;
     const sourceScheduleInfo = assignment?.schedule_info || offering?.schedule_info || '';
-    const scheduleRange = parseScheduleRange(sourceScheduleInfo);
-    const scheduleDays = parseScheduleDays(sourceScheduleInfo);
+    const parsedSchedules = parseCourseSchedule(sourceScheduleInfo);
 
     setEditingCourseId(course.id);
     setCourseForm({
@@ -2228,9 +2222,7 @@ export default function ManagementPage() {
       teacher_user_id: assignment?.status === 'ACTIVE' && assignment?.teacher_user_id ? String(assignment.teacher_user_id) : '',
       allow_without_teacher: assignment?.status !== 'ACTIVE' || !assignment?.teacher_user_id,
       modality: offering?.modality || 'PRESENCIAL',
-      schedule_days: scheduleDays.length ? scheduleDays : ['LUN'],
-      schedule_start: scheduleRange.start,
-      schedule_end: scheduleRange.end,
+      schedules: parsedSchedules,
       monthly_fee:
         offering?.monthly_fee === null || offering?.monthly_fee === undefined ? '' : String(offering.monthly_fee),
       capacity: offering?.capacity === null || offering?.capacity === undefined ? '' : String(offering.capacity),
@@ -2240,19 +2232,22 @@ export default function ManagementPage() {
 
   const deleteCourse = async (course) => {
     if (!canManageCourses) return;
-    const confirmed = window.confirm(`Se eliminará el curso ${course.name}.`);
+    const confirmed = await confirm({
+      title: 'Eliminar curso',
+      message: `¿Estás seguro de que deseas eliminar el curso "${course.name}"? Esta acción no se puede deshacer.`,
+      confirmText: 'Eliminar',
+      type: 'danger',
+    });
     if (!confirmed) return;
 
     setSaving(true);
-    setError('');
-    setMessage('');
     try {
       await api.delete(`/courses/${course.id}`);
-      setMessage('Curso eliminado correctamente.');
+      toast.success('Curso eliminado correctamente.');
       if (editingCourseId === course.id) resetCourseForm();
       await loadCourses({ campusId: courseCampusFilter || null });
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'No se pudo eliminar el curso.');
+      toast.error(requestError.response?.data?.message || 'No se pudo eliminar el curso.');
     } finally {
       setSaving(false);
     }
@@ -2325,9 +2320,6 @@ export default function ManagementPage() {
             );
           })}
       </div>
-
-      {message ? <p className="rounded-xl bg-primary-50 p-3 text-sm text-primary-800">{message}</p> : null}
-      {error ? <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
 
       {(activeTab === 'students' || activeTab === 'students_list') && (canViewStudents || canManageStudents) ? (
         <article className="card space-y-4">
@@ -3321,85 +3313,79 @@ export default function ManagementPage() {
 
           {loadingTeachers ? <p className="text-sm text-primary-700">Cargando docentes...</p> : null}
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left text-primary-600">
-                  <th className="pb-2 pr-3">Docente</th>
-                  <th className="pb-2 pr-3">Tipo doc.</th>
-                  <th className="pb-2 pr-3">Nro. doc.</th>
-                  <th className="pb-2 pr-3">Telefono</th>
-                  <th className="pb-2 pr-3">Correo</th>
-                  <th className="pb-2 pr-3">Sede base</th>
-                  <th className="pb-2 pr-3">Estado</th>
-                  <th className="pb-2">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {teachers.map((teacher) => {
-                  const parsedDocument = parseDocumentValue(teacher.document_number);
-                  return (
-                  <tr key={teacher.id} className="border-t border-primary-100">
-                    <td className="py-2 pr-3 font-medium">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 mt-4">
+            {teachers.map((teacher) => {
+              const parsedDocument = parseDocumentValue(teacher.document_number);
+              return (
+              <div key={teacher.id} className="flex flex-col rounded-2xl border border-primary-100 bg-white p-5 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md hover:border-primary-300">
+                <div className="flex justify-between items-start mb-3 gap-2">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-primary-900 text-lg leading-tight truncate" title={`${teacher.first_name} ${teacher.last_name}`}>
                       {teacher.first_name} {teacher.last_name}
-                    </td>
-                    <td className="py-2 pr-3">{parsedDocument.document_type}</td>
-                    <td className="py-2 pr-3">{parsedDocument.document_number || '-'}</td>
-                    <td className="py-2 pr-3">{teacher.phone || '-'}</td>
-                    <td className="py-2 pr-3">{teacher.email}</td>
-                    <td className="py-2 pr-3">{teacher.base_campus_name || '-'}</td>
-                    <td className="py-2 pr-3">
-                      <span
-                        className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                          teacher.is_active ? 'bg-primary-100 text-primary-800' : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {teacher.is_active ? 'ACTIVO' : 'INACTIVO'}
-                      </span>
-                    </td>
-                    <td className="py-2">
-                      <div className="flex flex-wrap gap-2">
-                        {canManageTeacherProfile ? (
-                          <button
-                            type="button"
-                            onClick={() => editTeacher(teacher)}
-                            className="rounded-lg border border-primary-300 px-2 py-1 text-xs font-semibold text-primary-800 hover:bg-primary-50"
-                          >
-                            EDITAR
-                          </button>
-                        ) : null}
-                        {canManageTeacherProfile && teacher.is_active ? (
-                          <button
-                            type="button"
-                            onClick={() => setTeacherStatus(teacher, false)}
-                            className="rounded-lg border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
-                          >
-                            ELIMINAR
-                          </button>
-                        ) : null}
-                        {canManageTeacherProfile && !teacher.is_active ? (
-                          <button
-                            type="button"
-                            onClick={() => setTeacherStatus(teacher, true)}
-                            className="rounded-lg border border-primary-300 px-2 py-1 text-xs font-semibold text-primary-800 hover:bg-primary-50"
-                          >
-                            ACTIVAR
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                  );
-                })}
-                {!loadingTeachers && teachers.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="py-4 text-center text-sm text-primary-600">
-                      No se encontraron docentes.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
+                    </h3>
+                    <p className="text-xs text-primary-600 mt-1 truncate" title={teacher.email}>{teacher.email}</p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                      teacher.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
+                    }`}
+                  >
+                    {teacher.is_active ? 'Activo' : 'Inactivo'}
+                  </span>
+                </div>
+                
+                <div className="bg-primary-50/50 rounded-xl p-3 border border-primary-50 mb-4 space-y-2">
+                   <div className="flex justify-between items-center text-xs gap-2">
+                     <span className="text-gray-500 font-medium whitespace-nowrap">{parsedDocument.document_type || 'Doc.'}</span>
+                     <span className="text-gray-900 font-semibold truncate text-right">{parsedDocument.document_number || '-'}</span>
+                   </div>
+                   <div className="flex justify-between items-center text-xs gap-2">
+                     <span className="text-gray-500 font-medium whitespace-nowrap">Sede Base</span>
+                     <span className="text-gray-900 font-semibold truncate flex-1 min-w-0 text-right" title={teacher.base_campus_name || 'No asignada'}>{teacher.base_campus_name || 'No asignada'}</span>
+                   </div>
+                   <div className="flex justify-between items-center text-xs gap-2">
+                     <span className="text-gray-500 font-medium whitespace-nowrap">Teléfono</span>
+                     <span className="text-gray-900 font-semibold truncate text-right">{teacher.phone || '-'}</span>
+                   </div>
+                </div>
+
+                <div className="mt-auto pt-4 border-t border-gray-100 flex flex-wrap gap-2">
+                  {canManageTeacherProfile ? (
+                    <button
+                      type="button"
+                      onClick={() => editTeacher(teacher)}
+                      className="flex-1 rounded-lg bg-primary-50 py-1.5 text-[11px] font-bold text-primary-700 hover:bg-primary-100 transition-colors"
+                    >
+                      EDITAR
+                    </button>
+                  ) : null}
+                  {canManageTeacherProfile && teacher.is_active ? (
+                    <button
+                      type="button"
+                      onClick={() => setTeacherStatus(teacher, false)}
+                      className="flex-1 rounded-lg bg-red-50 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-100 transition-colors"
+                    >
+                      ELIMINAR
+                    </button>
+                  ) : null}
+                  {canManageTeacherProfile && !teacher.is_active ? (
+                    <button
+                      type="button"
+                      onClick={() => setTeacherStatus(teacher, true)}
+                      className="flex-1 rounded-lg bg-emerald-50 py-1.5 text-[11px] font-bold text-emerald-600 hover:bg-emerald-100 transition-colors"
+                    >
+                      ACTIVAR
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              );
+            })}
+            {!loadingTeachers && teachers.length === 0 ? (
+              <div className="col-span-full py-12 text-center text-sm font-medium text-primary-700 bg-white rounded-2xl border border-dashed border-primary-200">
+                No se encontraron docentes.
+              </div>
+            ) : null}
           </div>
 
           <PaginationControls
@@ -3518,61 +3504,118 @@ export default function ManagementPage() {
 
           {loadingCampuses ? <p className="text-sm text-primary-700">Cargando sedes...</p> : null}
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left text-primary-600">
-                  <th className="pb-2 pr-3">Sede</th>
-                  <th className="pb-2 pr-3">Ciudad</th>
-                  <th className="pb-2 pr-3">Dirección</th>
-                  <th className="pb-2 pr-3">Teléfono</th>
-                  <th className="pb-2 pr-3">Correo</th>
-                  <th className="pb-2">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredCampuses.map((campus) => (
-                  <tr key={campus.id} className="border-t border-primary-100">
-                    <td className="py-2 pr-3 font-medium">{campus.name}</td>
-                    <td className="py-2 pr-3">{campus.city}</td>
-                    <td className="py-2 pr-3">{campus.address}</td>
-                    <td className="py-2 pr-3">{campus.phone || '-'}</td>
-                    <td className="py-2 pr-3">{campus.email || '-'}</td>
-                    <td className="py-2">
-                      <div className="flex flex-wrap gap-2">
-                        {canManageCampuses ? (
-                          <button
-                            type="button"
-                            onClick={() => editCampus(campus)}
-                            className="rounded-lg border border-primary-300 px-2 py-1 text-xs font-semibold text-primary-800 hover:bg-primary-50"
-                          >
-                            EDITAR
-                          </button>
-                        ) : null}
-                        {canManageCampuses ? (
-                          <button
-                            type="button"
-                            onClick={() => deleteCampus(campus)}
-                            className="rounded-lg border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
-                          >
-                            ELIMINAR
-                          </button>
-                        ) : null}
+          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {filteredCampuses.map((campus) => (
+              <div
+                key={campus.id}
+                className="group relative flex flex-col justify-between overflow-hidden rounded-xl border border-primary-100 bg-white p-3 shadow-sm transition-all hover:-translate-y-1 hover:border-primary-200 hover:shadow-md"
+              >
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h3 className="text-base font-bold text-primary-900 group-hover:text-accent-600 transition-colors">
+                        {campus.name}
+                      </h3>
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <span className="inline-flex items-center rounded-md bg-primary-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary-700 shadow-sm border border-primary-100">
+                          {campus.city}
+                        </span>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-                {!loadingCampuses && filteredCampuses.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-4 text-center text-sm text-primary-600">
-                      No se encontraron sedes.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${campus.address} ${campus.city}`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-start gap-3 text-sm text-primary-700 hover:text-accent-600 transition-colors group/link"
+                      title="Ver en Google Maps"
+                    >
+                      <div className="mt-0.5 flex-shrink-0 transition-transform group-hover/link:scale-110">
+                        <svg className="h-4 w-4 text-primary-400 group-hover/link:text-accent-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
+                        </svg>
+                      </div>
+                      <span className="leading-tight underline-offset-4 group-hover/link:underline">{campus.address}</span>
+                    </a>
+
+                    {campus.phone && (
+                      <a
+                        href={`tel:${campus.phone.replace(/\s+/g, '')}`}
+                        className="flex items-center gap-3 text-sm text-primary-700 hover:text-accent-600 transition-colors group/link"
+                        title="Llamar a esta sede"
+                      >
+                        <div className="flex-shrink-0 transition-transform group-hover/link:scale-110">
+                          <svg className="h-4 w-4 text-primary-400 group-hover/link:text-accent-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                          </svg>
+                        </div>
+                        <span className="underline-offset-4 group-hover/link:underline">{campus.phone}</span>
+                      </a>
+                    )}
+
+                    {campus.email && (
+                      <a
+                        href={`mailto:${campus.email}`}
+                        className="flex items-center gap-3 text-sm text-primary-700 hover:text-accent-600 transition-colors group/link"
+                        title="Enviar correo"
+                      >
+                        <div className="flex-shrink-0 transition-transform group-hover/link:scale-110">
+                          <svg className="h-4 w-4 text-primary-400 group-hover/link:text-accent-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+                          </svg>
+                        </div>
+                        <span className="truncate underline-offset-4 group-hover/link:underline">{campus.email}</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-6 flex items-center gap-2 pt-4 border-t border-primary-50">
+                  {canManageCampuses ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => editCampus(campus)}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-primary-200 bg-white py-2 text-xs font-bold text-primary-700 transition hover:bg-primary-50 hover:text-primary-900 active:scale-95"
+                      >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                        </svg>
+                        EDITAR
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteCampus(campus)}
+                        className="flex items-center justify-center rounded-xl border border-red-100 bg-red-50/50 px-3 py-2 text-xs font-bold text-red-600 transition hover:bg-red-100 hover:text-red-700 active:scale-95"
+                        title="Eliminar sede"
+                      >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+                        </svg>
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+            {!loadingCampuses && filteredCampuses.length === 0 ? (
+              <div className="col-span-full py-12 text-center text-sm text-primary-600">
+                <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-primary-50 text-primary-300">
+                  <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>
+                  </svg>
+                </div>
+                No se encontraron sedes registradas.
+              </div>
+            ) : null}
           </div>
         </article>
+      ) : null}
+
+      {activeTab === 'transfers' ? (
+        <TransfersManager title="Gestión de Traslados" showHeader={false} />
       ) : null}
 
       {activeTab === 'periods' && canReadPeriods ? (
@@ -3846,55 +3889,112 @@ export default function ManagementPage() {
                   <option value="VIRTUAL">Remoto</option>
                   <option value="HIBRIDO">Híbrido</option>
                 </select>
-                <input
-                  type="time"
-                  className="app-input"
-                  value={courseForm.schedule_start}
-                  onChange={(event) => setCourseForm((prev) => ({ ...prev, schedule_start: event.target.value }))}
-                  required
-                />
-                <input
-                  type="time"
-                  className="app-input"
-                  value={courseForm.schedule_end}
-                  onChange={(event) => setCourseForm((prev) => ({ ...prev, schedule_end: event.target.value }))}
-                  required
-                />
-                <div className="rounded-xl border border-primary-200 bg-white p-3 sm:col-span-2 lg:col-span-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Días del curso</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {COURSE_DAY_OPTIONS.map((day) => {
-                      const checked = courseForm.schedule_days.includes(day.value);
-                      return (
-                        <label
-                          key={day.value}
-                          className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium ${
-                            checked
-                              ? 'border-primary-500 bg-primary-50 text-primary-900'
-                              : 'border-primary-200 bg-white text-primary-700'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(event) =>
-                              setCourseForm((prev) => {
-                                const current = new Set(prev.schedule_days || []);
-                                if (event.target.checked) current.add(day.value);
-                                else current.delete(day.value);
-                                return {
-                                  ...prev,
-                                  schedule_days: COURSE_DAY_OPTIONS.map((option) => option.value).filter((value) =>
-                                    current.has(value),
-                                  ),
-                                };
-                              })
-                            }
-                          />
-                          {day.label}
-                        </label>
-                      );
-                    })}
+
+                <div className="rounded-xl border border-primary-200 bg-white p-4 sm:col-span-2 lg:col-span-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold uppercase tracking-wide text-primary-900">Horarios del curso</p>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-accent-600 hover:text-accent-700 flex items-center gap-1"
+                      onClick={() => setCourseForm(prev => ({
+                        ...prev,
+                        schedules: [...prev.schedules, { id: Date.now(), days: ['LUN'], start: '18:00', end: '20:00' }]
+                      }))}
+                    >
+                      <span className="text-lg">+</span> Agregar horario
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    {courseForm.schedules.map((schedule, index) => (
+                      <div key={schedule.id} className="relative rounded-xl border border-primary-100 bg-primary-50/30 p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-primary-500">Bloque #{index + 1}</span>
+                          {courseForm.schedules.length > 1 && (
+                            <button
+                              type="button"
+                              className="text-xs font-semibold text-red-600 hover:text-red-700"
+                              onClick={() => setCourseForm(prev => ({
+                                ...prev,
+                                schedules: prev.schedules.filter(s => s.id !== schedule.id)
+                              }))}
+                            >
+                              Eliminar
+                            </button>
+                          )}
+                        </div>
+                        
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="space-y-1">
+                            <span className="text-[11px] font-semibold text-primary-700">Hora inicio</span>
+                            <input
+                              type="time"
+                              className="app-input"
+                              value={schedule.start}
+                              onChange={(event) => setCourseForm(prev => ({
+                                ...prev,
+                                schedules: prev.schedules.map(s => s.id === schedule.id ? { ...s, start: event.target.value } : s)
+                              }))}
+                              required
+                            />
+                          </label>
+                          <label className="space-y-1">
+                            <span className="text-[11px] font-semibold text-primary-700">Hora fin</span>
+                            <input
+                              type="time"
+                              className="app-input"
+                              value={schedule.end}
+                              onChange={(event) => setCourseForm(prev => ({
+                                ...prev,
+                                schedules: prev.schedules.map(s => s.id === schedule.id ? { ...s, end: event.target.value } : s)
+                              }))}
+                              required
+                            />
+                          </label>
+                        </div>
+
+                        <div className="space-y-1">
+                          <span className="text-[11px] font-semibold text-primary-700">Días aplicables</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {COURSE_DAY_OPTIONS.map((day) => {
+                              const checked = schedule.days.includes(day.value);
+                              return (
+                                <label
+                                  key={day.value}
+                                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
+                                    checked
+                                      ? 'border-primary-500 bg-primary-50 text-primary-900 shadow-sm'
+                                      : 'border-primary-200 bg-white text-primary-600 hover:border-primary-300'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="h-3 w-3"
+                                    checked={checked}
+                                    onChange={(event) =>
+                                      setCourseForm((prev) => ({
+                                        ...prev,
+                                        schedules: prev.schedules.map(s => {
+                                          if (s.id !== schedule.id) return s;
+                                          const currentDays = new Set(s.days || []);
+                                          if (event.target.checked) currentDays.add(day.value);
+                                          else currentDays.delete(day.value);
+                                          return {
+                                            ...s,
+                                            days: COURSE_DAY_OPTIONS.map(opt => opt.value).filter(val => currentDays.has(val))
+                                          };
+                                        })
+                                      }))
+                                    }
+                                  />
+                                  {day.label}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <select
@@ -3968,82 +4068,84 @@ export default function ManagementPage() {
               ) : null}
               {loadingCourses ? <p className="text-sm text-primary-700">Cargando cursos...</p> : null}
 
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-primary-600">
-                      <th className="pb-2 pr-3">Curso</th>
-                      <th className="pb-2 pr-3">Docente</th>
-                      <th className="pb-2 pr-3">Modalidad</th>
-                      <th className="pb-2 pr-3">Horario</th>
-                      <th className="pb-2 pr-3">Importe</th>
-                      <th className="pb-2 pr-3">Duración</th>
-                      <th className="pb-2 pr-3">Nota mínima</th>
-                      <th className="pb-2 pr-3">Estado</th>
-                      <th className="pb-2">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredCourses.map((course) => {
-                      const offering = getPrimaryOffering(course);
-                      const assignment = offering ? assignmentByOfferingId.get(String(offering.offering_id)) : null;
-                      const modalityLabel =
-                        offering?.modality === 'VIRTUAL'
-                          ? 'REMOTO'
-                          : offering?.modality === 'HIBRIDO'
-                            ? 'HIBRIDO'
-                            : offering?.modality === 'PRESENCIAL'
-                              ? 'PRESENCIAL'
-                              : '-';
-                      const scheduleInfo = assignment?.schedule_info || offering?.schedule_info || '-';
-                      const fee = offering?.monthly_fee;
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 mt-4">
+                {filteredCourses.map((course) => {
+                  const offering = getPrimaryOffering(course);
+                  const assignment = offering ? assignmentByOfferingId.get(String(offering.offering_id)) : null;
+                  const modalityLabel =
+                    offering?.modality === 'VIRTUAL' ? 'REMOTO'
+                      : offering?.modality === 'HIBRIDO' ? 'HIBRIDO'
+                      : offering?.modality === 'PRESENCIAL' ? 'PRESENCIAL' : '-';
+                  const scheduleInfo = assignment?.schedule_info || offering?.schedule_info || '-';
+                  const fee = offering?.monthly_fee;
 
-                      return (
-                        <tr key={course.id} className="border-t border-primary-100">
-                          <td className="py-2 pr-3 font-medium">{course.name}</td>
-                          <td className="py-2 pr-3">{assignment?.teacher_name || 'Sin asignar'}</td>
-                          <td className="py-2 pr-3">{modalityLabel}</td>
-                          <td className="py-2 pr-3">{scheduleInfo}</td>
-                          <td className="py-2 pr-3">
-                            {fee === null || fee === undefined ? '-' : `S/ ${Number(fee).toFixed(2)}`}
-                          </td>
-                          <td className="py-2 pr-3">{course.duration_hours} h</td>
-                          <td className="py-2 pr-3">{Number(course.passing_grade).toFixed(1)}</td>
-                          <td className="py-2 pr-3">{course.is_active ? 'ACTIVO' : 'INACTIVO'}</td>
-                          <td className="py-2">
-                            <div className="flex flex-wrap gap-2">
-                              {canManageCourses ? (
-                                <button
-                                  type="button"
-                                  onClick={() => editCourse(course)}
-                                  className="rounded-lg border border-primary-300 px-2 py-1 text-xs font-semibold text-primary-800 hover:bg-primary-50"
-                                >
-                                  EDITAR
-                                </button>
-                              ) : null}
-                              {canManageCourses ? (
-                                <button
-                                  type="button"
-                                  onClick={() => deleteCourse(course)}
-                                  className="rounded-lg border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
-                                >
-                                  ELIMINAR
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {!loadingCourses && filteredCourses.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="py-4 text-center text-sm text-primary-600">
-                          No se encontraron cursos.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
+                  return (
+                    <div key={course.id} className="flex flex-col rounded-2xl border border-primary-100 bg-white p-5 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md hover:border-primary-300">
+                      <div className="flex justify-between items-start mb-3 gap-2">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-bold text-primary-900 text-lg leading-tight line-clamp-2" title={course.name}>
+                            {course.name}
+                          </h3>
+                          <p className="text-xs text-primary-600 mt-1 truncate" title={assignment?.teacher_name || 'Docente sin asignar'}>
+                            {assignment?.teacher_name || 'Docente sin asignar'}
+                          </p>
+                        </div>
+                        <span
+                          className={`shrink-0 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                            course.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
+                          }`}
+                        >
+                          {course.is_active ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </div>
+                      
+                      <div className="bg-primary-50/50 rounded-xl p-3 border border-primary-50 mb-4 space-y-2">
+                        <div className="flex justify-between items-center text-xs gap-2">
+                          <span className="text-gray-500 font-medium whitespace-nowrap">Modalidad</span>
+                          <span className="text-gray-900 font-semibold truncate text-right">{modalityLabel}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs gap-2">
+                          <span className="text-gray-500 font-medium whitespace-nowrap">Horario</span>
+                          <span className="text-gray-900 font-semibold truncate flex-1 min-w-0 text-right" title={scheduleInfo}>{scheduleInfo}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs gap-2">
+                          <span className="text-gray-500 font-medium whitespace-nowrap">Duración / Min</span>
+                          <span className="text-gray-900 font-semibold truncate text-right">{course.duration_hours}h / {Number(course.passing_grade).toFixed(1)}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs gap-2">
+                          <span className="text-gray-500 font-medium whitespace-nowrap">Importe</span>
+                          <span className="text-gray-900 font-semibold truncate text-right">{fee === null || fee === undefined ? '-' : `S/ ${Number(fee).toFixed(2)}`}</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-auto pt-4 border-t border-gray-100 flex flex-wrap gap-2">
+                        {canManageCourses ? (
+                          <button
+                            type="button"
+                            onClick={() => editCourse(course)}
+                            className="flex-1 rounded-lg bg-primary-50 py-1.5 text-[11px] font-bold text-primary-700 hover:bg-primary-100 transition-colors"
+                          >
+                            EDITAR
+                          </button>
+                        ) : null}
+                        {canManageCourses ? (
+                          <button
+                            type="button"
+                            onClick={() => deleteCourse(course)}
+                            className="flex-1 rounded-lg bg-red-50 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-100 transition-colors"
+                          >
+                            ELIMINAR
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+                {!loadingCourses && filteredCourses.length === 0 ? (
+                  <div className="col-span-full py-12 text-center text-sm font-medium text-primary-700 bg-white rounded-2xl border border-dashed border-primary-200">
+                     No se encontraron cursos.
+                  </div>
+                ) : null}
               </div>
             </>
           ) : (

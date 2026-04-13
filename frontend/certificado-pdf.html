@@ -440,6 +440,22 @@
         z-index: 3;
       }
 
+      .qr-code {
+        position: absolute;
+        bottom: 7.5%;
+        right: 7.5%;
+        width: clamp(50px, 7.2vw, 85px);
+        aspect-ratio: 1/1;
+        object-fit: contain;
+        visibility: hidden;
+        opacity: 0;
+        z-index: 3;
+      }
+      .qr-code.show-qr {
+        visibility: visible;
+        opacity: 1;
+      }
+
       .signatures {
         position: absolute;
         left: 8%;
@@ -737,6 +753,7 @@
             <span class="photo-placeholder">Foto</span>
           </div>
           <div class="code-strip" id="codeView">Codigo: CMP-2026-00125</div>
+          <img class="qr-code" id="qrCodeView" alt="QR Verificación" />
 
           <div class="signatures">
             <div class="sign-block">
@@ -854,23 +871,38 @@
           };
         };
 
-        const registerCertificateInLibrary = () => {
-          if (skipLibraryRegistration) return;
+        const registerCertificateInLibrary = async () => {
+          if (skipLibraryRegistration) {
+            return queryParams.get("token") || null;
+          }
 
           const auth = readStoredAuth();
           const accessToken = auth?.accessToken || "";
           const payload = buildLibraryPayload();
-          if (!accessToken || !payload) return;
+          if (!accessToken || !payload) return null;
 
-          fetch("/api/certificates/library", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${accessToken}`
-            },
-            body: JSON.stringify(payload),
-            keepalive: true
-          }).catch(() => {});
+          try {
+            const res = await fetch("/api/certificates/library", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${accessToken}`
+              },
+              body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+              const data = await res.json();
+              return data.item?.validation_token || null;
+            } else {
+              const errData = await res.json().catch(() => ({}));
+              console.warn("API Error registering certificate:", errData);
+              alert("Aviso de Seguridad: No se pudo registrar el certificado en la base de datos (" + (errData.message || res.status) + ").\n\nEl PDF se generará sin el código QR.");
+            }
+          } catch (e) {
+            console.error("No se pudo registrar en library", e);
+            alert("Error de conexión al registrar el certificado. El PDF no tendrá QR.");
+          }
+          return null;
         };
 
         const waitForImage = (imageElement) => {
@@ -941,10 +973,30 @@
 
           try {
             updatePreview();
+            
+            const qrCodeView = document.getElementById("qrCodeView");
+            const token = await registerCertificateInLibrary();
+            if (token) {
+              try {
+                // Generar QR desde el Backend
+                const qrRes = await fetch(`/api/certificates/verify/${token}/qr`);
+                if (qrRes.ok) {
+                  const blob = await qrRes.blob();
+                  const qrUrl = URL.createObjectURL(blob);
+                  qrCodeView.src = qrUrl;
+                  qrCodeView.classList.add("show-qr");
+                  await waitForImage(qrCodeView);
+                }
+              } catch (e) {
+                 console.warn("Fallo cargando QR", e);
+              }
+            }
+            
             await Promise.all([
               document.fonts?.ready || Promise.resolve(),
               waitForImage(templateImage),
-              waitForImage(photoView)
+              waitForImage(photoView),
+              qrCodeView.src ? waitForImage(qrCodeView) : Promise.resolve()
             ]);
             await waitForRenderFrame();
 
@@ -979,8 +1031,16 @@
               undefined,
               "FAST"
             );
+            
+            if (qrCodeView.src) {
+               qrCodeView.classList.remove("show-qr");
+               URL.revokeObjectURL(qrCodeView.src);
+               qrCodeView.removeAttribute("src");
+            }
+            
             pdf.save(`${buildPdfFileName()}.pdf`);
-            registerCertificateInLibrary();
+            
+            // If skipLibraryRegistration is false, we saved the certificate during registerCertificateInLibrary
           } catch (error) {
             console.error("No se pudo generar el PDF del certificado:", error);
             window.alert("No se pudo generar el PDF. Intenta nuevamente.");

@@ -69,10 +69,6 @@ export const MANAGEMENT_SECTION_ITEMS = [
 ];
 
 export const buildManagementSectionPath = (sectionKey) => {
-  if (sectionKey === 'transfers') {
-    return '/students?tab=transfers';
-  }
-
   const params = new URLSearchParams();
   if (sectionKey) {
     params.set('section', sectionKey);

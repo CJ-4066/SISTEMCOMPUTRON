@@ -158,6 +158,10 @@ function StaffPaymentsPage() {
   const [receiptFormat, setReceiptFormat] = useState('F2');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+
+  const [rejectingPaymentId, setRejectingPaymentId] = useState(null);
+  const [rejectionNotes, setRejectionNotes] = useState('');
+  const [savingRejection, setSavingRejection] = useState(false);
   const submitModeRef = useRef('save');
 
   const canViewPayments = hasPermission(PERMISSIONS.PAYMENTS_VIEW);
@@ -752,6 +756,11 @@ function StaffPaymentsPage() {
   const updateStatus = useCallback(
     async (paymentId, status) => {
       if (!canManagePayments) return;
+      if (status === 'REJECTED') {
+        setRejectingPaymentId(paymentId);
+        setRejectionNotes('');
+        return;
+      }
 
       setMessage('');
       setError('');
@@ -768,72 +777,121 @@ function StaffPaymentsPage() {
     [canManagePayments, loadPayments],
   );
 
+  const confirmRejection = async () => {
+    if (!rejectingPaymentId) return;
+
+    if (!rejectionNotes.trim()) {
+      setError('Debes ingresar el motivo del rechazo.');
+      return;
+    }
+
+    setSavingRejection(true);
+    setMessage('');
+    setError('');
+
+    try {
+      await yieldToBrowser();
+      await api.patch(`/payments/${rejectingPaymentId}/status`, {
+        status: 'REJECTED',
+        notes: rejectionNotes.trim(),
+      });
+      setMessage('Pago rechazado correctamente.');
+      setRejectingPaymentId(null);
+      setRejectionNotes('');
+      await loadPayments();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'No se pudo rechazar el pago.');
+    } finally {
+      setSavingRejection(false);
+    }
+  };
+
   const paymentTableRows = useMemo(
     () =>
       payments.map((payment) => (
-        <tr key={payment.id} className="border-t border-primary-100">
-          <td className="py-2 pr-3">#{payment.id}</td>
-          <td className="py-2 pr-3">{formatDateTime(payment.payment_date)}</td>
-          <td className="py-2 pr-3">{payment.processed_by_name || '-'}</td>
-          <td className="py-2 pr-3 font-medium">{payment.student_name}</td>
-          <td className="py-2 pr-3">S/ {round2(payment.total_amount).toFixed(2)}</td>
-          <td className="py-2 pr-3">S/ {round2(payment.amount_received).toFixed(2)}</td>
-          <td className="py-2 pr-3">S/ {round2(payment.overpayment_amount).toFixed(2)}</td>
-          <td className="py-2 pr-3">{toPaymentMethodLabel(payment.method)}</td>
-          <td className="py-2 pr-3">{payment.reference_code || '-'}</td>
-          <td className="py-2 pr-3">
-            {payment.no_evidence ? (
-              <span className="text-xs font-semibold text-amber-700">Sin evidencia (marcado)</span>
-            ) : payment.evidence_url ? (
-              <a
-                href={payment.evidence_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs font-semibold text-primary-700 underline"
-              >
-                {payment.evidence_name || 'Ver evidencia'}
-              </a>
-            ) : (
-              '-'
-            )}
-          </td>
-          <td className="py-2 pr-3">{toPaymentStatusLabel(payment.status)}</td>
-          <td className="py-2">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="rounded-lg border border-primary-200 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => openPaymentReceipt(payment.id)}
-              >
-                Boleta
-              </button>
-              <button
-                type="button"
-                className="rounded-lg border border-primary-200 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => updateStatus(payment.id, 'COMPLETED')}
-                disabled={!canManagePayments}
-              >
-                Completar
-              </button>
-              <button
-                type="button"
-                className="rounded-lg border border-accent-200 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => updateStatus(payment.id, 'PENDING')}
-                disabled={!canManagePayments}
-              >
-                Pendiente
-              </button>
-              <button
-                type="button"
-                className="rounded-lg border border-red-200 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => updateStatus(payment.id, 'REJECTED')}
-                disabled={!canManagePayments}
-              >
-                Rechazar
-              </button>
+        <div key={payment.id} className="flex flex-col rounded-2xl border border-primary-100 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md hover:border-primary-300">
+          <div className="flex justify-between items-start mb-3 gap-2">
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-primary-900 text-[15px] leading-tight truncate" title={payment.student_name}>
+                {payment.student_name}
+              </h3>
+              <p className="text-xs text-primary-600 mt-0.5 truncate border-b border-primary-50 pb-2">
+                ID: #{payment.id} • {formatDateTime(payment.payment_date)}
+              </p>
             </div>
-          </td>
-        </tr>
+          </div>
+
+          <div className="bg-primary-50/50 rounded-xl p-3 border border-primary-50 mb-4 space-y-2 mt-auto">
+            <div className="flex justify-between items-center text-xs gap-2">
+              <span className="text-gray-500 font-medium whitespace-nowrap">Estado</span>
+              <span className="font-bold text-primary-800 text-right">{toPaymentStatusLabel(payment.status)}</span>
+            </div>
+            <div className="flex justify-between items-center text-xs gap-2">
+              <span className="text-gray-500 font-medium whitespace-nowrap">Método</span>
+              <span className="text-gray-900 font-semibold truncate text-right">{toPaymentMethodLabel(payment.method)}</span>
+            </div>
+            <div className="flex justify-between items-center text-xs gap-2">
+              <span className="text-gray-500 font-medium whitespace-nowrap">Recibido</span>
+              <span className="text-emerald-700 font-bold text-right">S/ {round2(payment.amount_received).toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between items-center text-xs gap-2">
+              <span className="text-gray-500 font-medium whitespace-nowrap">N° Operación</span>
+              <span className="text-gray-900 font-semibold truncate flex-1 min-w-0 text-right">{payment.reference_code || '-'}</span>
+            </div>
+            <div className="flex justify-between items-center text-[11px] gap-2 pt-1 border-t border-primary-100/60 mt-2">
+              <span className="text-gray-500 font-medium whitespace-nowrap">Evidencia</span>
+              <div className="flex-1 min-w-0 text-right">
+                {payment.no_evidence ? (
+                  <span className="font-semibold text-amber-700">Sin evidencia</span>
+                ) : payment.evidence_url ? (
+                  <a href={payment.evidence_url} target="_blank" rel="noreferrer" className="font-semibold text-primary-700 underline truncate block">{payment.evidence_name || 'Ver evidencia'}</a>
+                ) : (
+                  <span className="text-gray-400">-</span>
+                )}
+              </div>
+            </div>
+            {payment.notes && payment.status === 'REJECTED' ? (
+              <div className="mt-2 rounded-md bg-red-50 px-2 py-1.5 text-[11px] text-red-800 border border-red-100/50">
+                <span className="font-bold">Motivo de rechazo:</span> {payment.notes}
+              </div>
+            ) : null}
+            {payment.notes && payment.status !== 'REJECTED' ? (
+              <div className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900 border border-amber-100/50">
+                <span className="font-bold">Nota:</span> {payment.notes}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-auto pt-2 border-t border-primary-100 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="flex-1 rounded-lg bg-primary-50 py-1.5 text-[11px] font-bold text-primary-700 hover:bg-primary-100 transition-colors disabled:opacity-50"
+              onClick={() => openPaymentReceipt(payment.id)}
+            >
+              BOLETA
+            </button>
+            {canManagePayments ? (
+              <button
+                type="button"
+                className="flex-[0.5] rounded-lg bg-emerald-50 py-1.5 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 transition-colors disabled:opacity-50"
+                onClick={() => updateStatus(payment.id, 'COMPLETED')}
+                title="Marcar completado"
+              >
+                ✓
+              </button>
+            ) : null}
+            {canManagePayments ? (
+              <button
+                type="button"
+                className="flex-[0.5] rounded-lg bg-red-50 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50"
+                onClick={() => updateStatus(payment.id, 'REJECTED')}
+                title="Rechazar pago"
+              >
+                ✗
+              </button>
+            ) : null}
+          </div>
+        </div>
       )),
     [canManagePayments, openPaymentReceipt, payments, updateStatus],
   );
@@ -1216,35 +1274,15 @@ function StaffPaymentsPage() {
             </label>
           </div>
 
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="text-left text-primary-600">
-                <th className="pb-2 pr-3">ID</th>
-                <th className="pb-2 pr-3">Fecha/Hora</th>
-                <th className="pb-2 pr-3">Usuario registro</th>
-                <th className="pb-2 pr-3">Alumno</th>
-                <th className="pb-2 pr-3">Aplicado</th>
-                <th className="pb-2 pr-3">Recibido</th>
-                <th className="pb-2 pr-3">Saldo favor</th>
-                <th className="pb-2 pr-3">Método</th>
-                <th className="pb-2 pr-3">N° operación</th>
-                <th className="pb-2 pr-3">Evidencia</th>
-                <th className="pb-2 pr-3">Estado</th>
-                <th className="pb-2">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paymentTableRows}
-
-              {!loadingPayments && payments.length === 0 ? (
-                <tr>
-                  <td colSpan={12} className="py-4 text-center text-sm text-primary-600">
-                    No se encontraron pagos con los filtros seleccionados.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+          <div className="grid gap-4 mt-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            {paymentTableRows}
+          </div>
+          
+          {!loadingPayments && payments.length === 0 ? (
+            <div className="py-10 text-center text-sm text-primary-600 bg-primary-50/30 rounded-xl border border-primary-50 mt-4">
+              No se encontraron pagos con los filtros seleccionados.
+            </div>
+          ) : null}
 
           <div className="mt-4 flex flex-wrap gap-2">
             {hasMorePayments ? (
@@ -1269,6 +1307,42 @@ function StaffPaymentsPage() {
             ) : null}
           </div>
         </article>
+      ) : null}
+
+      {rejectingPaymentId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h2 className="mb-2 text-xl font-bold text-red-700">Rechazar pago</h2>
+            <p className="mb-4 text-sm font-medium text-primary-700">
+              Ingresa el motivo exacto del rechazo para que quede registrado.
+            </p>
+            <textarea
+              className="app-input min-h-[100px] w-full resize-none text-sm font-medium"
+              value={rejectionNotes}
+              onChange={(e) => setRejectionNotes(e.target.value)}
+              placeholder="Ej: El voucher está desenfocado, el monto es incorrecto..."
+              autoFocus
+            />
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setRejectingPaymentId(null)}
+                disabled={savingRejection}
+                className="rounded-xl border border-primary-200 bg-white px-4 py-2 text-sm font-semibold text-primary-700 transition hover:bg-primary-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmRejection}
+                disabled={savingRejection || !rejectionNotes.trim()}
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {savingRejection ? 'Rechazando...' : 'Confirmar rechazo'}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </section>
   );

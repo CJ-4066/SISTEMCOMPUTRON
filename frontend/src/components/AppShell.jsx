@@ -11,13 +11,16 @@ import {
   LibraryBig,
   LogOut,
   Menu,
+  Moon,
   NotebookTabs,
   ReceiptText,
   School,
   ShieldCheck,
+  Sun,
   UsersRound,
   Wallet,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
 import { MANAGEMENT_SECTION_ITEMS, buildManagementSectionPath } from '../constants/managementSections';
@@ -26,38 +29,10 @@ import { preloadCoreRoutes, preloadRoute } from '../utils/routePreload';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, permissions: [PERMISSIONS.DASHBOARD_VIEW] },
-  {
-    to: '/courses',
-    label: 'Salones',
-    icon: BookOpenText,
-    permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW],
-  },
-  {
-    to: '/students?tab=transfers',
-    label: 'Traslados',
-    icon: ArrowLeftRight,
-    permissions: [PERMISSIONS.STUDENTS_VIEW, PERMISSIONS.ENROLLMENTS_MANAGE],
-    roles: ['ADMIN'],
-  },
-  {
-    to: '/courses?tab=attendance',
-    label: 'Asistencias',
-    icon: ClipboardCheck,
-    permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW, PERMISSIONS.ACADEMIC_ATTENDANCE_MANAGE],
-  },
-  {
-    to: '/calendar',
-    label: 'Calendario',
-    icon: CalendarRange,
-    permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW],
-  },
-  {
-    to: '/virtual-library',
-    label: 'Biblioteca virtual',
-    icon: LibraryBig,
-    permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW],
-    adminOnly: true,
-  },
+  { to: '/users', label: 'Usuarios', icon: UsersRound, permissions: [PERMISSIONS.USERS_VIEW] },
+];
+
+const postAcademicaItems = [
   { to: '/payments', label: 'Reporte de pagos', icon: ReceiptText, permissions: [PERMISSIONS.PAYMENTS_VIEW] },
   {
     to: '/certificate-library',
@@ -66,7 +41,28 @@ const navItems = [
     permissions: [PERMISSIONS.PAYMENTS_VIEW, PERMISSIONS.PAYMENTS_MANAGE],
   },
   { to: '/certificates', label: 'Certificados', icon: ShieldCheck, permissions: [PERMISSIONS.PAYMENTS_VIEW] },
-  { to: '/users', label: 'Usuarios', icon: UsersRound, permissions: [PERMISSIONS.USERS_VIEW] },
+];
+
+const aulaVirtualItems = [
+  {
+    to: '/courses',
+    label: 'Salones',
+    icon: BookOpenText,
+    permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW],
+  },
+  {
+    to: '/courses?tab=attendance',
+    label: 'Asistencias',
+    icon: ClipboardCheck,
+    permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW, PERMISSIONS.ACADEMIC_ATTENDANCE_MANAGE],
+  },
+  {
+    to: '/virtual-library',
+    label: 'Biblioteca virtual',
+    icon: LibraryBig,
+    permissions: [PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW],
+    adminOnly: true,
+  },
 ];
 
 const ChevronIcon = ({ className = '' }) => (
@@ -87,6 +83,7 @@ export default function AppShell() {
   const [open, setOpen] = useState(false);
   const [isDashboardExpanded, setIsDashboardExpanded] = useState(false);
   const [isManagementExpanded, setIsManagementExpanded] = useState(false);
+  const [isAulaVirtualExpanded, setIsAulaVirtualExpanded] = useState(false);
   const { user, logout, hasAnyPermission } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -117,15 +114,14 @@ export default function AppShell() {
   }, []);
 
   const roles = useMemo(() => user?.roles || [], [user]);
-  const isAdminProfile = roles.includes('ADMIN');
   const isDocenteProfile = roles.length === 1 && roles.includes('DOCENTE');
   const isAlumnoProfile = roles.length === 1 && roles.includes('ALUMNO');
   const isTeacher2222 =
     user?.email?.trim().toLowerCase() === '2222@gmail.com' && roles.includes('DOCENTE');
   const isDashboardRoute = location.pathname === '/';
   const isManagementRoute = location.pathname === '/management';
-  const activeStudentTab = location.pathname === '/students' ? new URLSearchParams(location.search).get('tab') : null;
-  const isStudentTransfersRoute = location.pathname === '/students' && activeStudentTab === 'transfers';
+  const aulaVirtualActivePaths = ['/courses', '/calendar', '/virtual-library'];
+  const isAulaVirtualRoute = aulaVirtualActivePaths.some(p => location.pathname.startsWith(p));
   const activeCoursesTab = location.pathname === '/courses' ? new URLSearchParams(location.search).get('tab') : null;
   const isAttendanceTabActive = activeCoursesTab === 'attendance';
   const isCourseWorkspaceRoute = location.pathname.startsWith('/courses/salon/');
@@ -137,15 +133,10 @@ export default function AppShell() {
   const requestedManagementSection = isManagementRoute
     ? new URLSearchParams(location.search).get('section')
     : null;
-  const canUseTransfersShortcut =
-    isAdminProfile && hasAnyPermission([PERMISSIONS.STUDENTS_VIEW, PERMISSIONS.ENROLLMENTS_MANAGE]);
 
   const isNavItemActive = (itemPath, pathActive) => {
     if (itemPath === '/courses') {
       return isCoursesOverviewRoute;
-    }
-    if (itemPath === '/students?tab=transfers') {
-      return location.pathname === '/students' && activeStudentTab === 'transfers';
     }
     if (itemPath === '/courses?tab=attendance') {
       return location.pathname === '/courses' && isAttendanceTabActive;
@@ -159,10 +150,20 @@ export default function AppShell() {
     }
 
     return MANAGEMENT_SECTION_ITEMS.filter((item) => {
-      if (item.key === 'transfers' && canUseTransfersShortcut) return false;
       return hasAnyPermission(item.permissions || []);
     });
-  }, [canUseTransfersShortcut, hasAnyPermission, isAlumnoProfile, isDocenteProfile]);
+  }, [hasAnyPermission, isAlumnoProfile, isDocenteProfile]);
+
+  const visibleAulaVirtualItems = useMemo(() => {
+    if (isAlumnoProfile) {
+      return [];
+    }
+    return aulaVirtualItems.filter((item) => {
+      if (item.adminOnly && isDocenteProfile) return false;
+      if (!hasAnyPermission(item.permissions || [])) return false;
+      return true;
+    });
+  }, [hasAnyPermission, isAlumnoProfile, isDocenteProfile]);
 
   const visibleDashboardItems = useMemo(() => {
     if (isAlumnoProfile || isTeacher2222) {
@@ -209,21 +210,18 @@ export default function AppShell() {
 
   const isCertificatesRoute = location.pathname === '/certificates';
   const dashboardMenuActive = isDashboardRoute || isDashboardExpanded;
-  const managementMenuActive =
-    isManagementRoute || (!canUseTransfersShortcut && isStudentTransfersRoute) || isManagementExpanded;
+  const managementMenuActive = isManagementRoute || isManagementExpanded;
 
   const renderSidebarLabel = (label, Icon, active, { trailing = null, compact = false } = {}) => (
     <span className="flex items-center justify-between gap-3">
       <span className="flex min-w-0 items-center gap-3">
         {Icon ? (
           <span
-            className={`flex shrink-0 items-center justify-center ${
-              compact ? 'h-7 w-7 rounded-lg' : 'h-8 w-8 rounded-xl'
-            } transition ${
-              active
+            className={`flex shrink-0 items-center justify-center ${compact ? 'h-7 w-7 rounded-lg' : 'h-8 w-8 rounded-xl'
+              } transition ${active
                 ? 'bg-white/15 text-white'
                 : 'bg-primary-800/90 text-accent-100 group-hover:bg-primary-700 group-hover:text-white'
-            }`}
+              }`}
           >
             <Icon className={compact ? 'h-4 w-4' : 'h-4 w-4'} />
           </span>
@@ -243,10 +241,16 @@ export default function AppShell() {
   }, [isDashboardRoute]);
 
   useEffect(() => {
-    if (!isManagementRoute && !isStudentTransfersRoute) {
+    if (!isManagementRoute) {
       setIsManagementExpanded(false);
     }
-  }, [isManagementRoute, isStudentTransfersRoute]);
+  }, [isManagementRoute]);
+
+  useEffect(() => {
+    if (!isAulaVirtualRoute) {
+      setIsAulaVirtualExpanded(false);
+    }
+  }, [isAulaVirtualRoute]);
 
   const handleLogout = async () => {
     await logout();
@@ -256,6 +260,7 @@ export default function AppShell() {
   const handlePrimaryNavClick = () => {
     setIsDashboardExpanded(false);
     setIsManagementExpanded(false);
+    setIsAulaVirtualExpanded(false);
     setOpen(false);
   };
 
@@ -263,6 +268,7 @@ export default function AppShell() {
     const nextExpanded = !isDashboardExpanded;
     setIsDashboardExpanded(nextExpanded);
     setIsManagementExpanded(false);
+    setIsAulaVirtualExpanded(false);
 
     if (nextExpanded) {
       const defaultSectionKey = activeDashboardSection || visibleDashboardItems[0]?.key;
@@ -276,6 +282,7 @@ export default function AppShell() {
     const nextExpanded = !isManagementExpanded;
     setIsManagementExpanded(nextExpanded);
     setIsDashboardExpanded(false);
+    setIsAulaVirtualExpanded(false);
 
     if (nextExpanded) {
       const defaultSectionKey = activeManagementSection || visibleManagementItems[0]?.key;
@@ -285,14 +292,26 @@ export default function AppShell() {
     }
   };
 
+  const handleAulaVirtualClick = () => {
+    const nextExpanded = !isAulaVirtualExpanded;
+    setIsAulaVirtualExpanded(nextExpanded);
+    setIsDashboardExpanded(false);
+    setIsManagementExpanded(false);
+
+    if (nextExpanded && visibleAulaVirtualItems.length > 0) {
+      if (!isAulaVirtualRoute) {
+        navigate(visibleAulaVirtualItems[0].to);
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[260px_minmax(0,1fr)]">
       <aside
-        className={`fixed left-0 top-0 z-20 flex h-full w-[260px] transform flex-col overflow-y-auto border-r border-primary-200 bg-primary-900 text-primary-50 transition lg:static lg:translate-x-0 ${
-          open ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={`fixed left-0 top-0 z-20 flex h-full w-[260px] transform flex-col overflow-y-auto border-r border-primary-200 bg-primary-900 text-primary-50 transition lg:static lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'
+          }`}
       >
-        <div className="border-b border-primary-700 p-5">
+        <div className="p-5 pb-2">
           <p className="text-xs uppercase tracking-[0.2em] text-primary-200">Instituto</p>
           <h1 className="text-xl font-semibold">Computron</h1>
           <p className="mt-2 text-sm text-primary-200">{user?.first_name} {user?.last_name}</p>
@@ -310,10 +329,9 @@ export default function AppShell() {
                 onMouseEnter={() => preloadRoute(item.to)}
                 onFocus={() => preloadRoute(item.to)}
                 className={({ isActive }) =>
-                  `group block rounded-xl px-3 py-2 text-sm font-medium transition ${
-                    isNavItemActive(item.to, isActive)
-                      ? 'bg-primary-500 text-white'
-                      : 'text-primary-100 hover:bg-primary-800 hover:text-white'
+                  `group block rounded-xl px-3 py-2 text-sm font-medium transition ${isNavItemActive(item.to, isActive)
+                    ? 'bg-primary-500 text-white'
+                    : 'text-primary-100 hover:bg-primary-800 hover:text-white'
                   }`
                 }
               >
@@ -330,10 +348,9 @@ export default function AppShell() {
                     onMouseEnter={() => preloadRoute('/')}
                     onFocus={() => preloadRoute('/')}
                     className={
-                      `group block w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${
-                        dashboardMenuActive
-                          ? 'bg-primary-500 text-white'
-                          : 'text-primary-100 hover:bg-primary-800 hover:text-white'
+                      `group block w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${dashboardMenuActive
+                        ? 'bg-primary-500 text-white'
+                        : 'text-primary-100 hover:bg-primary-800 hover:text-white'
                       }`
                     }
                   >
@@ -343,11 +360,10 @@ export default function AppShell() {
                   </button>
 
                   <div
-                    className={`overflow-hidden transition-all duration-200 ${
-                      isDashboardExpanded ? 'max-h-[220px] opacity-100' : 'max-h-0 opacity-0'
-                    }`}
+                    className={`overflow-hidden transition-all duration-200 ${isDashboardExpanded ? 'max-h-[220px] opacity-100' : 'max-h-0 opacity-0'
+                      }`}
                   >
-                    <div className="ml-3 space-y-1 border-l border-primary-700/80 pl-3 pt-1">
+                    <div className="ml-3 space-y-1 pl-3 pt-1">
                       {visibleDashboardItems.map((item) => {
                         const isSubItemActive = activeDashboardSection === item.key;
                         return (
@@ -358,10 +374,9 @@ export default function AppShell() {
                             onMouseEnter={() => preloadRoute('/')}
                             onFocus={() => preloadRoute('/')}
                             className={() =>
-                              `group block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${
-                                isSubItemActive
-                                  ? 'bg-primary-800 text-white'
-                                  : 'text-primary-200 hover:bg-primary-800 hover:text-white'
+                              `group block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${isSubItemActive
+                                ? 'bg-primary-800 text-white'
+                                : 'text-primary-200 hover:bg-primary-800 hover:text-white'
                               }`
                             }
                           >
@@ -382,10 +397,9 @@ export default function AppShell() {
                     onMouseEnter={() => preloadRoute('/management')}
                     onFocus={() => preloadRoute('/management')}
                     className={
-                      `group block w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${
-                        managementMenuActive
-                          ? 'bg-primary-500 text-white'
-                          : 'text-primary-100 hover:bg-primary-800 hover:text-white'
+                      `group block w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${managementMenuActive
+                        ? 'bg-primary-500 text-white'
+                        : 'text-primary-100 hover:bg-primary-800 hover:text-white'
                       }`
                     }
                   >
@@ -395,14 +409,12 @@ export default function AppShell() {
                   </button>
 
                   <div
-                    className={`overflow-hidden transition-all duration-200 ${
-                      isManagementExpanded ? 'max-h-[420px] opacity-100' : 'max-h-0 opacity-0'
-                    }`}
+                    className={`overflow-hidden transition-all duration-200 ${isManagementExpanded ? 'max-h-[420px] opacity-100' : 'max-h-0 opacity-0'
+                      }`}
                   >
-                    <div className="ml-3 space-y-1 border-l border-primary-700/80 pl-3 pt-1">
+                    <div className="ml-3 space-y-1 pl-3 pt-1">
                       {visibleManagementItems.map((item) => {
-                        const isSubItemActive =
-                          item.key === 'transfers' ? isStudentTransfersRoute : activeManagementSection === item.key;
+                        const isSubItemActive = activeManagementSection === item.key;
                         const itemPath = buildManagementSectionPath(item.key);
                         return (
                           <NavLink
@@ -412,10 +424,59 @@ export default function AppShell() {
                             onMouseEnter={() => preloadRoute(itemPath)}
                             onFocus={() => preloadRoute(itemPath)}
                             className={() =>
-                              `group block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${
-                                isSubItemActive
-                                  ? 'bg-primary-800 text-white'
-                                  : 'text-primary-200 hover:bg-primary-800 hover:text-white'
+                              `group block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${isSubItemActive
+                                ? 'bg-primary-800 text-white'
+                                : 'text-primary-200 hover:bg-primary-800 hover:text-white'
+                              }`
+                            }
+                          >
+                            {renderSidebarLabel(item.label, item.icon, isSubItemActive, { compact: true })}
+                          </NavLink>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {visibleAulaVirtualItems.length ? (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={handleAulaVirtualClick}
+                    onMouseEnter={() => preloadRoute('/courses')}
+                    onFocus={() => preloadRoute('/courses')}
+                    className={
+                      `group block w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition ${isAulaVirtualExpanded || isAulaVirtualRoute
+                        ? 'bg-primary-500 text-white'
+                        : 'text-primary-100 hover:bg-primary-800 hover:text-white'
+                      }`
+                    }
+                  >
+                    {renderSidebarLabel('Aula Virtual', BookOpenText, isAulaVirtualExpanded || isAulaVirtualRoute, {
+                      trailing: <ChevronIcon className={`h-4 w-4 transition ${isAulaVirtualExpanded ? 'rotate-180' : ''}`} />,
+                    })}
+                  </button>
+
+                  <div
+                    className={`overflow-hidden transition-all duration-200 ${isAulaVirtualExpanded ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'
+                      }`}
+                  >
+                    <div className="ml-3 space-y-1 pl-3 pt-1">
+                      {visibleAulaVirtualItems.map((item) => {
+                        const pathWithoutSearch = item.to.split('?')[0];
+                        const isSubItemActive = isNavItemActive(item.to, location.pathname === pathWithoutSearch);
+                        return (
+                          <NavLink
+                            key={item.to}
+                            to={item.to}
+                            onClick={() => setOpen(false)}
+                            onMouseEnter={() => preloadRoute(pathWithoutSearch)}
+                            onFocus={() => preloadRoute(pathWithoutSearch)}
+                            className={() =>
+                              `group block rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition ${isSubItemActive
+                                ? 'bg-primary-800 text-white'
+                                : 'text-primary-200 hover:bg-primary-800 hover:text-white'
                               }`
                             }
                           >
@@ -437,10 +498,9 @@ export default function AppShell() {
                   onMouseEnter={() => preloadRoute(item.to)}
                   onFocus={() => preloadRoute(item.to)}
                   className={({ isActive }) =>
-                    `group block rounded-xl px-3 py-2 text-sm font-medium transition ${
-                      isNavItemActive(item.to, isActive)
-                        ? 'bg-primary-500 text-white'
-                        : 'text-primary-100 hover:bg-primary-800 hover:text-white'
+                    `group block rounded-xl px-3 py-2 text-sm font-medium transition ${isNavItemActive(item.to, isActive)
+                      ? 'bg-primary-500 text-white'
+                      : 'text-primary-100 hover:bg-primary-800 hover:text-white'
                     }`
                   }
                 >
@@ -466,25 +526,40 @@ export default function AppShell() {
       </aside>
 
       <div className="min-h-screen min-w-0 lg:ml-0">
-        <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-primary-100 bg-white/90 px-4 py-3 backdrop-blur">
-          <button
-            type="button"
-            onClick={() => setOpen((value) => !value)}
-            className="rounded-lg border border-primary-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide lg:hidden"
-          >
-            <span className="flex items-center gap-2">
-              <Menu className="h-4 w-4" />
-              <span>Menú</span>
+        <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-primary-100 bg-white/90 px-4 py-3 backdrop-blur dark:border-white/10 dark:bg-slate-900/80">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setOpen((value) => !value)}
+              className="rounded-lg border border-primary-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide lg:hidden dark:border-white/20 dark:text-white"
+            >
+              <span className="flex items-center gap-2">
+                <Menu className="h-4 w-4" />
+                <span>Menú</span>
+              </span>
+            </button>
+            <h2 className="text-lg font-semibold text-primary-800 dark:text-white">Sistema de Gestión</h2>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <span className="hidden rounded-full bg-accent-100 px-3 py-1 text-xs font-semibold text-accent-700 sm:inline-block">
+              Online
             </span>
-          </button>
-          <h2 className="text-lg font-semibold text-primary-800">Sistema de Gestión</h2>
-          <span className="rounded-full bg-accent-100 px-3 py-1 text-xs font-semibold text-accent-700">
-            Online
-          </span>
+          </div>
         </header>
 
         <main className={isCertificatesRoute ? 'w-full min-w-0 p-2 md:p-3' : 'mx-auto w-full max-w-7xl min-w-0 p-3 sm:p-4 md:p-6'}>
-          <Outlet />
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
 
