@@ -1,8 +1,12 @@
 const ApiError = require('../utils/apiError');
 const { verifyAccessToken } = require('../utils/token');
 const { getUserPermissionCodes } = require('../services/permissions.service');
+const {
+  assertRequestCampusAccess,
+  getUserCampuses,
+} = require('../services/userCampuses.service');
 
-const authenticate = (req, _res, next) => {
+const authenticate = async (req, _res, next) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -11,16 +15,30 @@ const authenticate = (req, _res, next) => {
 
   const token = authHeader.slice(7);
 
+  let decoded;
   try {
-    const decoded = verifyAccessToken(token);
+    decoded = verifyAccessToken(token);
+  } catch (error) {
+    return next(new ApiError(401, 'Token inválido o expirado.'));
+  }
+
+  try {
+    const campusAccess = await getUserCampuses(decoded.sub);
+    const roles = decoded.roles || [];
     req.user = {
       id: decoded.sub,
       email: decoded.email,
-      roles: decoded.roles || [],
+      roles,
+      base_campus_id: campusAccess.base_campus_id,
+      campus_ids: campusAccess.campus_ids,
+      campus_names: campusAccess.campus_names,
+      is_global_campus_access:
+        roles.includes('ADMIN') && campusAccess.campus_ids.length === 0,
     };
+    await assertRequestCampusAccess(req, req.user);
     return next();
   } catch (error) {
-    return next(new ApiError(401, 'Token inválido o expirado.'));
+    return next(error);
   }
 };
 

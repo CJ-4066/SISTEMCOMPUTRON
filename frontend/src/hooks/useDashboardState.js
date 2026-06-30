@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import { getCampusScopeId, setCampusScopeId } from '../utils/campusScope';
 
-export default function useDashboardState({ canViewDashboard, canViewCampuses }) {
+export default function useDashboardState({
+  canViewDashboard,
+  canSelectCampus,
+  allowGlobalCampusScope,
+  fallbackCampusId,
+}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [campuses, setCampuses] = useState([]);
@@ -55,14 +60,14 @@ export default function useDashboardState({ canViewDashboard, canViewCampuses })
   }, [canViewDashboard, campusScopeId]);
 
   useEffect(() => {
-    if (!canViewCampuses) {
+    if (!canSelectCampus) {
       setCampuses([]);
       return;
     }
 
     const loadCampuses = async () => {
       try {
-        const response = await api.get('/campuses', { _skipCampusScope: true });
+        const response = await api.get('/auth/campuses', { _skipCampusScope: true });
         setCampuses(response.data.items || []);
       } catch {
         setCampuses([]);
@@ -70,32 +75,37 @@ export default function useDashboardState({ canViewDashboard, canViewCampuses })
     };
 
     loadCampuses();
-  }, [canViewCampuses]);
+  }, [canSelectCampus]);
 
   useEffect(() => {
     setCampusDraftId(String(campusScopeId || ''));
   }, [campusScopeId]);
 
   const selectedCampusName = useMemo(() => {
-    if (!campusScopeId) return 'Todas las sedes';
+    if (!campusScopeId) return allowGlobalCampusScope ? 'Todas las sedes' : 'Sede asignada';
     return campuses.find((campus) => Number(campus.id) === Number(campusScopeId))?.name || `Sede #${campusScopeId}`;
-  }, [campusScopeId, campuses]);
+  }, [allowGlobalCampusScope, campusScopeId, campuses]);
 
   const toggleCampusSelector = () => {
     setShowCampusSelector((current) => !current);
   };
 
   const applyCampusScope = () => {
-    const nextValue = campusDraftId ? Number(campusDraftId) : null;
+    const nextValue = campusDraftId
+      ? Number(campusDraftId)
+      : allowGlobalCampusScope
+        ? null
+        : Number(fallbackCampusId) || null;
     setCampusScopeId(nextValue);
     setCampusScopeIdState(nextValue);
     setShowCampusSelector(false);
   };
 
   const clearCampusScope = () => {
-    setCampusScopeId(null);
-    setCampusScopeIdState(null);
-    setCampusDraftId('');
+    const nextValue = allowGlobalCampusScope ? null : Number(fallbackCampusId) || null;
+    setCampusScopeId(nextValue);
+    setCampusScopeIdState(nextValue);
+    setCampusDraftId(String(nextValue || ''));
     setShowCampusSelector(false);
   };
 

@@ -6,6 +6,7 @@ import {
   ROLE_ADMIN,
 } from './constants';
 import { getPermissionGroupState, getPrimaryRole } from './helpers';
+import CampusMultiSelect from './CampusMultiSelect';
 
 const resolvePermissionCardClassName = (state) => {
   if (state === 'all') return 'border-primary-300 bg-primary-50';
@@ -38,6 +39,8 @@ export default function CredentialEditorModal({
   canManageStatus,
   canManageRoles,
   isRootAdmin,
+  campuses,
+  loadingCampuses,
   showPassword,
   onTogglePassword,
   enabledMenuCount,
@@ -266,6 +269,15 @@ export default function CredentialEditorModal({
               </label>
             </div>
           </div>
+
+          <CampusMultiSelect
+            campuses={campuses}
+            selectedIds={credentialForm.campus_ids || []}
+            onChange={(campusIds) => onCredentialFieldChange('campus_ids', campusIds)}
+            loading={loadingCampuses}
+            disabled={!canManagePermissions}
+            allowGlobal={canManagePermissions && isRootAdmin && credentialForm.role === ROLE_ADMIN}
+          />
 
           <div className="rounded-xl border border-primary-100 p-3">
             <div className="flex flex-wrap items-start justify-between gap-3">

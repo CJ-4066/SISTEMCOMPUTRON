@@ -7,6 +7,26 @@ const AuthContext = createContext(null);
 const STORAGE_KEY = 'computron_auth';
 const emptyAuth = { accessToken: '', refreshToken: '', user: null };
 
+const syncCampusScopeForUser = (user) => {
+  const campusIds = Array.isArray(user?.campus_ids)
+    ? user.campus_ids.map(Number).filter((campusId) => Number.isInteger(campusId) && campusId > 0)
+    : user?.base_campus_id
+      ? [Number(user.base_campus_id)]
+      : [];
+  const isGlobalAdmin =
+    Array.isArray(user?.roles) && user.roles.includes('ADMIN') && campusIds.length === 0;
+
+  if (isGlobalAdmin) {
+    setCampusScopeId(null);
+    return;
+  }
+
+  const currentCampusId = getCampusScopeId();
+  if (!currentCampusId || !campusIds.includes(Number(currentCampusId))) {
+    setCampusScopeId(user?.base_campus_id || campusIds[0] || null);
+  }
+};
+
 const readStorage = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -54,8 +74,6 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let active = true;
-    const isAdminUser = (user) => Array.isArray(user?.roles) && user.roles.includes('ADMIN');
-
     const bootstrap = async () => {
       const currentAuth = authRef.current;
       if (!currentAuth.accessToken && !currentAuth.refreshToken) {
@@ -93,11 +111,7 @@ export function AuthProvider({ children }) {
         if (active) {
           const nextUser = meResponse.data.user;
           setAuth((prev) => ({ ...prev, user: nextUser }));
-          if (isAdminUser(nextUser)) {
-            setCampusScopeId(null);
-          } else if (!getCampusScopeId() && nextUser?.base_campus_id) {
-            setCampusScopeId(meResponse.data.user.base_campus_id);
-          }
+          syncCampusScopeForUser(nextUser);
         }
       } catch {
         if (active) {
@@ -130,11 +144,7 @@ export function AuthProvider({ children }) {
         user: response.data.user,
       });
       setAuthToken(response.data.access_token);
-      if (Array.isArray(response.data?.user?.roles) && response.data.user.roles.includes('ADMIN')) {
-        setCampusScopeId(null);
-      } else if (!getCampusScopeId() && response.data?.user?.base_campus_id) {
-        setCampusScopeId(response.data.user.base_campus_id);
-      }
+      syncCampusScopeForUser(response.data.user);
       return { ok: true };
     } catch (error) {
       const statusCode = error?.response?.status;

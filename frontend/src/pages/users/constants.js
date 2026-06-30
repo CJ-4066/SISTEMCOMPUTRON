@@ -16,6 +16,7 @@ export const INITIAL_CREDENTIAL_FORM = {
   phone: '',
   address: '',
   role: '',
+  campus_ids: [],
 };
 
 export const MANAGEMENT_ACCESS_GROUPS = [

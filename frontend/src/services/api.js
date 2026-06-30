@@ -82,7 +82,7 @@ api.interceptors.request.use((config) => {
 
   const method = String(config.method || 'get').toLowerCase();
   const shouldApplyCampusScope =
-    method === 'get' && !config._skipCampusScope && !isAuthRoute(config.url);
+    !config._skipCampusScope && !isAuthRoute(config.url);
 
   if (shouldApplyCampusScope) {
     const campusScopeId = getCampusScopeId();

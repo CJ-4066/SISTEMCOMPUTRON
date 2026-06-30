@@ -21,6 +21,13 @@ const {
   hashToken,
 } = require('../utils/token');
 const { normalizeDocumentNumber } = require('../utils/documentNumber');
+const {
+  assertCampusIdsAllowed,
+  getUserCampuses,
+  normalizeCampusIds,
+  replaceUserCampuses,
+  validateCampusIds,
+} = require('../services/userCampuses.service');
 
 const router = express.Router();
 
@@ -60,6 +67,7 @@ const registerSchema = z.object({
     password: z.string().min(8).max(72),
     roles: z.array(z.enum(ROLES)).min(1).max(3).default(['SECRETARIADO']).optional(),
     base_campus_id: optionalCampusIdSchema,
+    campus_ids: z.array(z.coerce.number().int().positive()).max(100).optional(),
     must_change_password: z.boolean().optional().default(false),
     teacher_assignment: teacherAssignmentSchema.optional(),
   }),
@@ -119,6 +127,7 @@ router.post(
       password,
       roles = ['SECRETARIADO'],
       base_campus_id = null,
+      campus_ids,
       must_change_password = false,
       teacher_assignment = null,
     } = req.validated.body;
@@ -126,8 +135,10 @@ router.post(
     const normalizedDocumentNumber = normalizeDocumentNumber(document_number);
     const normalizedPhone = phone ? String(phone).trim() : null;
     const normalizedAddress = address ? String(address).trim() : null;
-    let creatorBaseCampusId = null;
-    let resolvedBaseCampusId = base_campus_id;
+    let resolvedCampusIds =
+      campus_ids !== undefined
+        ? normalizeCampusIds(campus_ids)
+        : normalizeCampusIds(base_campus_id ? [base_campus_id] : []);
 
     if (roles.includes('DOCENTE')) {
       if (!normalizedPhone) {
@@ -175,37 +186,20 @@ router.post(
         throw new ApiError(403, 'No tiene permisos para configurar asignaciones docentes al crear usuarios.');
       }
 
-      const creatorResult = await query(
-        `SELECT base_campus_id
-         FROM users
-         WHERE id = $1
-         LIMIT 1`,
-        [req.user.id],
-      );
-
-      creatorBaseCampusId = creatorResult.rows[0]?.base_campus_id || null;
-      if (creatorBaseCampusId && resolvedBaseCampusId && Number(resolvedBaseCampusId) !== Number(creatorBaseCampusId)) {
-        throw new ApiError(403, 'Solo puede registrar usuarios en su propia sede.');
+      if (!req.user.is_global_campus_access && resolvedCampusIds.length === 0) {
+        resolvedCampusIds = normalizeCampusIds(req.user.campus_ids);
       }
 
-      if (creatorBaseCampusId && !resolvedBaseCampusId) {
-        resolvedBaseCampusId = creatorBaseCampusId;
-      }
+      resolvedCampusIds = assertCampusIdsAllowed(req.user, resolvedCampusIds, {
+        allowGlobal: requestedRoles.includes('ADMIN'),
+      });
     }
 
-    if (resolvedBaseCampusId !== null) {
-      const campusResult = await query(
-        `SELECT id
-         FROM campuses
-         WHERE id = $1
-         LIMIT 1`,
-        [resolvedBaseCampusId],
-      );
-
-      if (campusResult.rowCount === 0) {
-        throw new ApiError(400, 'La sede seleccionada no existe.');
-      }
+    if (userCount > 0 && !roles.includes('ADMIN') && resolvedCampusIds.length === 0) {
+      throw new ApiError(400, 'Debe seleccionar al menos una sede para el usuario.');
     }
+    resolvedCampusIds = await validateCampusIds(resolvedCampusIds);
+    const resolvedBaseCampusId = resolvedCampusIds[0] || null;
 
     const existing = await query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
     if (existing.rowCount > 0) {
@@ -284,6 +278,15 @@ router.post(
         );
       }
 
+      await replaceUserCampuses(
+        {
+          userId: user.id,
+          campusIds: resolvedCampusIds,
+          assignedBy: req.user?.id || null,
+        },
+        tx,
+      );
+
       if (teacher_assignment) {
         const {
           course_campus_id,
@@ -306,8 +309,15 @@ router.post(
         }
 
         const selectedCampusId = Number(courseCampusResult.rows[0].campus_id);
-        if (creatorBaseCampusId && Number(creatorBaseCampusId) !== selectedCampusId) {
-          throw new ApiError(403, 'Solo puede asignar docentes a cursos de su propia sede.');
+        if (
+          req.user &&
+          !req.user.is_global_campus_access &&
+          !normalizeCampusIds(req.user.campus_ids).includes(selectedCampusId)
+        ) {
+          throw new ApiError(403, 'No puede asignar docentes fuera de sus sedes autorizadas.');
+        }
+        if (resolvedCampusIds.length > 0 && !resolvedCampusIds.includes(selectedCampusId)) {
+          throw new ApiError(400, 'La asignación docente debe pertenecer a una sede autorizada para el usuario.');
         }
 
         const normalizedOverrideReason = campus_override_reason?.trim() || null;
@@ -385,7 +395,7 @@ router.post(
         }
       }
 
-      return { ...user, roles };
+      return { ...user, campus_ids: resolvedCampusIds, roles };
     });
 
     invalidateUserPermissionCache(created.id);
@@ -430,6 +440,7 @@ router.post(
       throw new ApiError(403, 'Usuario sin roles asignados.');
     }
     const permissions = await getUserPermissionCodes(user.id);
+    const campusAccess = await getUserCampuses(user.id);
 
     const payload = { sub: user.id, email: user.email, roles };
     const access_token = signAccessToken(payload);
@@ -451,7 +462,9 @@ router.post(
         first_name: user.first_name,
         last_name: user.last_name,
         email: user.email,
-        base_campus_id: user.base_campus_id || null,
+        base_campus_id: campusAccess.base_campus_id,
+        campus_ids: campusAccess.campus_ids,
+        campus_names: campusAccess.campus_names,
         must_change_password: Boolean(user.must_change_password),
         roles,
         permissions,
@@ -521,11 +534,15 @@ router.post(
 
     const roles = await getUserRoles(req.user.id);
     const permissions = await getUserPermissionCodes(req.user.id);
+    const campusAccess = await getUserCampuses(req.user.id);
 
     return res.json({
       message: 'Contraseña actualizada.',
       user: {
         ...updatedResult.rows[0],
+        base_campus_id: campusAccess.base_campus_id,
+        campus_ids: campusAccess.campus_ids,
+        campus_names: campusAccess.campus_names,
         roles,
         permissions,
       },
@@ -632,6 +649,24 @@ router.post(
 );
 
 router.get(
+  '/campuses',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const campusIds = normalizeCampusIds(req.user.campus_ids);
+    const { rows } = await query(
+      `SELECT id, name
+       FROM campuses
+       WHERE $1::boolean = TRUE
+          OR id = ANY($2::bigint[])
+       ORDER BY LOWER(name), id`,
+      [req.user.is_global_campus_access, campusIds],
+    );
+
+    return res.json({ items: rows });
+  }),
+);
+
+router.get(
   '/me',
   authenticate,
   asyncHandler(async (req, res) => {
@@ -648,10 +683,14 @@ router.get(
 
     const roles = await getUserRoles(req.user.id);
     const permissions = await getUserPermissionCodes(req.user.id);
+    const campusAccess = await getUserCampuses(req.user.id);
 
     return res.json({
       user: {
         ...rows[0],
+        base_campus_id: campusAccess.base_campus_id,
+        campus_ids: campusAccess.campus_ids,
+        campus_names: campusAccess.campus_names,
         must_change_password: Boolean(rows[0].must_change_password),
         roles,
         permissions,

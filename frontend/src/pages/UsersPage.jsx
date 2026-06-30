@@ -75,9 +75,10 @@ export default function UsersPage() {
   const canManageRoles = hasPermission(PERMISSIONS.USERS_ROLES_MANAGE);
   const canManageStatus = hasPermission(PERMISSIONS.USERS_STATUS_MANAGE);
   const canManagePermissions = hasPermission(PERMISSIONS.USERS_PERMISSIONS_MANAGE);
-  const canReadCampuses = hasPermission(PERMISSIONS.CAMPUSES_VIEW) || hasPermission(PERMISSIONS.CAMPUSES_MANAGE);
-  const isRootAdmin = (user?.roles || []).includes(ROLE_ADMIN) && !user?.base_campus_id;
-  const creatorHasCampusScope = Boolean(user?.base_campus_id);
+  const userCampusIds = (user?.campus_ids || (user?.base_campus_id ? [user.base_campus_id] : []))
+    .map(Number)
+    .filter(Number.isFinite);
+  const isRootAdmin = (user?.roles || []).includes(ROLE_ADMIN) && userCampusIds.length === 0;
 
   const canOpenEditor = canManageStatus || canManagePermissions || (canManageRoles && isRootAdmin);
   const canConfigureCreateAccess = canManagePermissions && rolePermissionTemplates !== null;
@@ -207,6 +208,15 @@ export default function UsersPage() {
         setCredentialAccessPermissions(normalizedPermissions);
         setInitialCredentialAccessPermissions(normalizedPermissions);
         setCredentialPermissionMode(detail.permission_mode || 'ROLE');
+        setCredentialForm((prev) => ({
+          ...prev,
+          campus_ids: (
+            detail.campus_ids ||
+            (detail.base_campus_id ? [detail.base_campus_id] : prev.campus_ids || [])
+          )
+            .map(Number)
+            .filter(Number.isFinite),
+        }));
       } catch (requestError) {
         resetCredentialAccessState();
         setError(
@@ -243,21 +253,21 @@ export default function UsersPage() {
   }, [canManagePermissions]);
 
   const loadCampuses = useCallback(async () => {
-    if (!canReadCampuses) {
+    if (!canCreateUsers && !canManagePermissions) {
       setCampuses([]);
       return;
     }
 
     setLoadingCampuses(true);
     try {
-      const response = await api.get('/campuses', { _skipCampusScope: true });
+      const response = await api.get('/users/available-campuses', { _skipCampusScope: true });
       setCampuses(response.data?.items || []);
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'No se pudieron cargar las sedes.');
     } finally {
       setLoadingCampuses(false);
     }
-  }, [canReadCampuses]);
+  }, [canCreateUsers, canManagePermissions]);
 
   useEffect(() => {
     const debounce = setTimeout(() => {
@@ -329,7 +339,7 @@ export default function UsersPage() {
           { key: 'usuario', label: 'Usuario' },
           { key: 'documento', label: 'Documento' },
           { key: 'correo', label: 'Correo' },
-          { key: 'sede', label: 'Sede' },
+          { key: 'sedes', label: 'Sedes' },
           { key: 'activo', label: 'Activo' },
           { key: 'roles', label: 'Roles' },
           { key: 'creado_en', label: 'Creado en' },
@@ -388,14 +398,14 @@ export default function UsersPage() {
 
     resetFeedback();
     setShowCreateUserModal(true);
-    setCreateUserForm(createNewUserForm());
+    setCreateUserForm(createNewUserForm(DEFAULT_CREATE_ROLE, userCampusIds));
     setCreateAccessPermissions(canConfigureCreateAccess ? getRolePermissionTemplate(DEFAULT_CREATE_ROLE) : []);
     setCreateAccessMenuLevel('MAIN');
 
     if (canManagePermissions && rolePermissionTemplates === null && !loadingRolePermissionTemplates) {
       loadRolePermissionTemplates();
     }
-    if (canManageRoles && isRootAdmin && canReadCampuses && campuses.length === 0 && !loadingCampuses) {
+    if (campuses.length === 0 && !loadingCampuses) {
       loadCampuses();
     }
   };
@@ -412,6 +422,9 @@ export default function UsersPage() {
 
     if (canManagePermissions) {
       loadCredentialAccess(targetUser.id);
+    }
+    if (campuses.length === 0 && !loadingCampuses) {
+      loadCampuses();
     }
   };
 
@@ -465,7 +478,6 @@ export default function UsersPage() {
     setCreateUserForm((prev) => ({
       ...prev,
       [field]: value,
-      ...(field === 'role' && value !== ROLE_ADMIN ? { base_campus_id: '' } : {}),
     }));
   }, []);
 
@@ -521,10 +533,9 @@ export default function UsersPage() {
     const normalizedAddress = createUserForm.address.trim();
     const normalizedRole =
       canManageRoles ? (createUserForm.role || DEFAULT_CREATE_ROLE).trim() : DEFAULT_CREATE_ROLE;
-    const adminBaseCampusId =
-      normalizedRole === ROLE_ADMIN && canManageRoles && isRootAdmin && createUserForm.base_campus_id
-        ? Number(createUserForm.base_campus_id)
-        : null;
+    const selectedCampusIds = sortUnique(
+      (createUserForm.campus_ids || []).map(Number).filter(Number.isFinite),
+    );
     const useEmailAsPassword = Boolean(createUserForm.use_email_as_password);
     const resolvedPassword = useEmailAsPassword ? normalizedEmail : createUserForm.password;
 
@@ -564,6 +575,16 @@ export default function UsersPage() {
       }
     }
 
+    if (normalizedRole !== ROLE_ADMIN && selectedCampusIds.length === 0) {
+      setError('Selecciona al menos una sede para el usuario.');
+      return;
+    }
+
+    if (normalizedRole === ROLE_ADMIN && !isRootAdmin && selectedCampusIds.length === 0) {
+      setError('Selecciona al menos una sede para el administrador.');
+      return;
+    }
+
     const registerPayload = {
       first_name: normalizedFirstName,
       last_name: normalizedLastName,
@@ -573,7 +594,7 @@ export default function UsersPage() {
       email: normalizedEmail,
       password: resolvedPassword,
       roles: [normalizedRole],
-      ...(normalizedRole === ROLE_ADMIN && canManageRoles && isRootAdmin ? { base_campus_id: adminBaseCampusId } : {}),
+      campus_ids: selectedCampusIds,
       must_change_password: useEmailAsPassword,
     };
     const normalizedCreateAccess = sortUnique(createAccessPermissions);
@@ -650,8 +671,26 @@ export default function UsersPage() {
     const normalizedAccess = sortUnique(credentialAccessPermissions);
     const normalizedInitialAccess = sortUnique(initialCredentialAccessPermissions);
     const accessChanged = canManagePermissions && !arraysEqual(normalizedAccess, normalizedInitialAccess);
+    const normalizedCampusIds = sortUnique(
+      (credentialForm.campus_ids || []).map(Number).filter(Number.isFinite),
+    );
+    const initialCampusIds = sortUnique(
+      (
+        editingCredentialUser.campus_ids ||
+        (editingCredentialUser.base_campus_id ? [editingCredentialUser.base_campus_id] : [])
+      )
+        .map(Number)
+        .filter(Number.isFinite),
+    );
+    const campusesChanged =
+      canManagePermissions && !arraysEqual(normalizedCampusIds, initialCampusIds);
 
-    if (Object.keys(payload).length === 0 && !roleChanged && !accessChanged) {
+    if (nextRole !== ROLE_ADMIN && normalizedCampusIds.length === 0) {
+      setError('El usuario debe tener al menos una sede autorizada.');
+      return;
+    }
+
+    if (Object.keys(payload).length === 0 && !roleChanged && !accessChanged && !campusesChanged) {
       setError('No hay cambios para guardar.');
       return;
     }
@@ -664,18 +703,13 @@ export default function UsersPage() {
         await api.patch(`/users/${editingCredentialUser.id}/credentials`, payload);
       }
 
-      if (roleChanged) {
-        await api.patch(`/users/${editingCredentialUser.id}/role`, {
-          role: nextRole,
-        });
-      }
-
-      if (accessChanged) {
+      if (accessChanged || campusesChanged) {
         await api.put(
           `/users/permissions/user/${editingCredentialUser.id}`,
           {
-            permission_mode: 'PERSONAL',
+            permission_mode: accessChanged ? 'PERSONAL' : credentialPermissionMode,
             permissions: normalizedAccess,
+            ...(campusesChanged ? { campus_ids: normalizedCampusIds } : {}),
           },
           { _skipCampusScope: true },
         );
@@ -683,7 +717,13 @@ export default function UsersPage() {
         setCredentialPermissionMode('PERSONAL');
       }
 
-      setMessage(getCredentialSaveSuccessMessage({ accessChanged, roleChanged }));
+      if (roleChanged) {
+        await api.patch(`/users/${editingCredentialUser.id}/role`, {
+          role: nextRole,
+        });
+      }
+
+      setMessage(getCredentialSaveSuccessMessage({ accessChanged, roleChanged, campusesChanged }));
 
       closeCredentialEditor();
       await loadUsers();
@@ -791,7 +831,6 @@ export default function UsersPage() {
         onSave={saveNewUser}
         canManageRoles={canManageRoles}
         isRootAdmin={isRootAdmin}
-        creatorHasCampusScope={creatorHasCampusScope}
         campuses={campuses}
         loadingCampuses={loadingCampuses}
         showPassword={showCreatePassword}
@@ -819,6 +858,8 @@ export default function UsersPage() {
         canManageStatus={canManageStatus}
         canManageRoles={canManageRoles}
         isRootAdmin={isRootAdmin}
+        campuses={campuses}
+        loadingCampuses={loadingCampuses}
         showPassword={showPassword}
         onTogglePassword={() => setShowPassword((prev) => !prev)}
         enabledMenuCount={enabledMenuCount}

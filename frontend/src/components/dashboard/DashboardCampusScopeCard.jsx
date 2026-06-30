@@ -1,5 +1,6 @@
 export default function DashboardCampusScopeCard({
   canViewCampuses,
+  allowGlobalCampusScope,
   campuses,
   showCampusSelector,
   selectedCampusName,
@@ -43,7 +44,7 @@ export default function DashboardCampusScopeCard({
               value={campusDraftId}
               onChange={(event) => onCampusDraftChange(event.target.value)}
             >
-              <option value="">Todas las sedes</option>
+              {allowGlobalCampusScope ? <option value="">Todas las sedes</option> : null}
               {campuses.map((campus) => (
                 <option key={campus.id} value={campus.id}>
                   {campus.name}
@@ -58,13 +59,15 @@ export default function DashboardCampusScopeCard({
           >
             Aplicar sede
           </button>
-          <button
-            type="button"
-            onClick={onClear}
-            className="rounded-xl border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-800 hover:bg-primary-50"
-          >
-            Ver todo
-          </button>
+          {allowGlobalCampusScope ? (
+            <button
+              type="button"
+              onClick={onClear}
+              className="rounded-xl border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-800 hover:bg-primary-50"
+            >
+              Ver todo
+            </button>
+          ) : null}
         </article>
       ) : null}
     </>

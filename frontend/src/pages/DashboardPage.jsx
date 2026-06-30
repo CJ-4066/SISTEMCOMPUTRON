@@ -19,6 +19,16 @@ export default function DashboardPage() {
   const canViewCampuses = hasPermission(PERMISSIONS.CAMPUSES_VIEW);
   const canViewPayments = hasPermission(PERMISSIONS.PAYMENTS_VIEW);
   const canViewReports = hasPermission(PERMISSIONS.REPORTS_VIEW);
+  const assignedCampusIds = (
+    user?.campus_ids ||
+    (user?.base_campus_id ? [user.base_campus_id] : [])
+  )
+    .map(Number)
+    .filter(Number.isFinite);
+  const allowGlobalCampusScope =
+    (user?.roles || []).includes('ADMIN') && assignedCampusIds.length === 0;
+  const canSelectCampus =
+    canViewCampuses || assignedCampusIds.length > 1 || allowGlobalCampusScope;
   const isTeacher2222 = user?.email?.trim().toLowerCase() === '2222@gmail.com';
   const isDocente = (user?.roles || []).includes('DOCENTE');
   const isAlumnoProfile = (user?.roles || []).length === 1 && (user?.roles || []).includes('ALUMNO');
@@ -45,7 +55,12 @@ export default function DashboardPage() {
     toggleCampusSelector,
     applyCampusScope,
     clearCampusScope,
-  } = useDashboardState({ canViewDashboard, canViewCampuses });
+  } = useDashboardState({
+    canViewDashboard,
+    canSelectCampus,
+    allowGlobalCampusScope,
+    fallbackCampusId: user?.base_campus_id || assignedCampusIds[0] || null,
+  });
   const dashboardViewModel = useMemo(
     () => createDashboardViewModel({ summary, hideIncome }),
     [hideIncome, summary],
@@ -71,7 +86,8 @@ export default function DashboardPage() {
   return (
     <section className="space-y-5">
       <DashboardCampusScopeCard
-        canViewCampuses={canViewCampuses}
+        canViewCampuses={canSelectCampus}
+        allowGlobalCampusScope={allowGlobalCampusScope}
         campuses={campuses}
         showCampusSelector={showCampusSelector}
         selectedCampusName={selectedCampusName}

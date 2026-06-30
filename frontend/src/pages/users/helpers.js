@@ -34,13 +34,16 @@ export const createCredentialForm = (targetUser = {}) => {
     phone: targetUser.phone || '',
     address: targetUser.address || '',
     role: getPrimaryRole(targetUser.roles),
+    campus_ids: (targetUser.campus_ids || (targetUser.base_campus_id ? [targetUser.base_campus_id] : []))
+      .map(Number)
+      .filter(Number.isFinite),
   };
 };
 
-export const createNewUserForm = (role = DEFAULT_CREATE_ROLE) => ({
+export const createNewUserForm = (role = DEFAULT_CREATE_ROLE, campusIds = []) => ({
   ...INITIAL_CREDENTIAL_FORM,
   role,
-  base_campus_id: '',
+  campus_ids: campusIds.map(Number).filter(Number.isFinite),
 });
 
 export const buildUserExportRows = (users = []) =>
@@ -49,7 +52,10 @@ export const buildUserExportRows = (users = []) =>
     usuario: `${item.first_name || ''} ${item.last_name || ''}`.trim(),
     documento: item.document_number || '',
     correo: item.email || '',
-    sede: item.base_campus_name || (getPrimaryRole(item.roles) === 'ADMIN' ? 'Todas las sedes' : 'Sin sede'),
+    sedes:
+      (item.campus_names || []).join(' | ') ||
+      item.base_campus_name ||
+      (getPrimaryRole(item.roles) === 'ADMIN' ? 'Todas las sedes' : 'Sin sede'),
     activo: item.is_active ? 'SI' : 'NO',
     roles: (item.roles || []).join(' | '),
     creado_en: item.created_at ? new Date(item.created_at).toLocaleString() : '',
@@ -122,7 +128,10 @@ export const buildCredentialUpdateState = ({
   };
 };
 
-export const getCredentialSaveSuccessMessage = ({ accessChanged, roleChanged }) => {
+export const getCredentialSaveSuccessMessage = ({ accessChanged, roleChanged, campusesChanged }) => {
+  if (campusesChanged) {
+    return 'Datos, accesos y sedes autorizadas actualizados.';
+  }
   if (accessChanged && roleChanged) {
     return 'Datos, rol y accesos actualizados.';
   }

@@ -6,6 +6,7 @@ import {
   ROLE_ADMIN,
 } from './constants';
 import { getPermissionGroupState } from './helpers';
+import CampusMultiSelect from './CampusMultiSelect';
 
 const resolvePermissionCardClassName = (state) => {
   if (state === 'all') return 'border-primary-300 bg-primary-50';
@@ -38,7 +39,6 @@ export default function UserCreateModal({
   onSave,
   canManageRoles,
   isRootAdmin,
-  creatorHasCampusScope,
   campuses,
   loadingCampuses,
   showPassword,
@@ -208,44 +208,15 @@ export default function UserCreateModal({
                 {!canManageRoles ? (
                   <span className="block text-xs text-primary-600">No tienes permiso para gestionar roles.</span>
                 ) : null}
-                {canManageRoles && creatorHasCampusScope ? (
-                  <span className="block text-xs text-primary-600">
-                    Si creas un ADMIN desde una sede específica, ese nuevo admin quedará limitado a tu misma sede.
-                  </span>
-                ) : null}
               </label>
 
-              {canManageRoles && isAdminRole && isRootAdmin ? (
-                <label className="space-y-1 text-sm text-primary-800">
-                  <span className="font-medium">Alcance por sede del administrador</span>
-                  <select
-                    className="app-input"
-                    value={form.base_campus_id || ''}
-                    onChange={bindField('base_campus_id')}
-                    disabled={!isAdminRole || loadingCampuses}
-                  >
-                    <option value="">Todas las sedes</option>
-                    {campuses.map((campus) => (
-                      <option key={campus.id} value={campus.id}>
-                        {campus.name}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="block text-xs text-primary-600">
-                    Déjalo en "Todas las sedes" para crear un admin raíz, o elige una sede para limitarlo a una sola.
-                  </span>
-                </label>
-              ) : null}
-
-              {canManageRoles && isAdminRole && creatorHasCampusScope && !isRootAdmin ? (
-                <div className="space-y-1 rounded-xl border border-primary-100 bg-primary-50 px-3 py-3 text-sm text-primary-800">
-                  <span className="font-medium">Alcance por sede del administrador</span>
-                  <p className="text-sm text-primary-700">
-                    Este nuevo administrador heredará automáticamente tu sede actual. Desde esta cuenta no se puede
-                    asignar otra sede ni acceso global.
-                  </p>
-                </div>
-              ) : null}
+              <CampusMultiSelect
+                campuses={campuses}
+                selectedIds={form.campus_ids || []}
+                onChange={(campusIds) => onFieldChange('campus_ids', campusIds)}
+                loading={loadingCampuses}
+                allowGlobal={canManageRoles && isRootAdmin && isAdminRole}
+              />
 
               <label className="space-y-1 text-sm text-primary-800">
                 <span className="font-medium">Teléfono</span>

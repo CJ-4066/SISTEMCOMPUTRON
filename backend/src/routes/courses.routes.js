@@ -7,6 +7,7 @@ const ApiError = require('../utils/apiError');
 const validate = require('../middlewares/validate');
 const { authenticate, authorizePermission } = require('../middlewares/auth');
 const { parseCampusScopeId } = require('../utils/campusScope');
+const { assertCampusIdsAllowed } = require('../services/userCampuses.service');
 const {
   buildCacheKey,
   getCachedResponse,
@@ -22,6 +23,20 @@ const LIST_CACHE_TTL_MS = env.responseCacheTtlMs;
 const invalidateCourseReadCaches = () => {
   invalidateCacheByPrefix(COURSES_LIST_CACHE_PREFIX);
   invalidateCacheByPrefix(TEACHER_ASSIGNMENTS_CACHE_PREFIX);
+};
+
+const assertOfferingAccess = async (req, offeringId) => {
+  const result = await query(
+    `SELECT campus_id
+     FROM course_campus
+     WHERE id = $1
+     LIMIT 1`,
+    [offeringId],
+  );
+  if (result.rowCount === 0) {
+    throw new ApiError(404, 'Oferta no encontrada.');
+  }
+  assertCampusIdsAllowed(req.user, [result.rows[0].campus_id]);
 };
 
 const courseSchema = z.object({
@@ -343,6 +358,7 @@ router.put(
   ),
   asyncHandler(async (req, res) => {
     const { offeringId } = req.validated.params;
+    await assertOfferingAccess(req, offeringId);
     const {
       campus_id,
       modality,
@@ -387,6 +403,7 @@ router.delete(
   ),
   asyncHandler(async (req, res) => {
     const { offeringId } = req.validated.params;
+    await assertOfferingAccess(req, offeringId);
 
     try {
       const result = await query('DELETE FROM course_campus WHERE id = $1', [offeringId]);

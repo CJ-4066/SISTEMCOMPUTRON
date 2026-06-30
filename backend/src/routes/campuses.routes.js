@@ -5,6 +5,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
 const validate = require('../middlewares/validate');
 const { authenticate, authorizePermission } = require('../middlewares/auth');
+const { normalizeCampusIds } = require('../services/userCampuses.service');
 
 const router = express.Router();
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida (YYYY-MM-DD)');
@@ -33,11 +34,15 @@ router.use(authenticate);
 router.get(
   '/',
   authorizePermission('campuses.view'),
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const campusIds = normalizeCampusIds(req.user.campus_ids);
     const { rows } = await query(
       `SELECT id, name, address, city, phone, email, created_at
        FROM campuses
+       WHERE $1::boolean = TRUE
+          OR id = ANY($2::bigint[])
        ORDER BY name`,
+      [req.user.is_global_campus_access, campusIds],
     );
 
     return res.json({ items: rows });
@@ -49,6 +54,10 @@ router.post(
   authorizePermission('campuses.manage'),
   validate(campusSchema),
   asyncHandler(async (req, res) => {
+    if (!req.user.is_global_campus_access) {
+      throw new ApiError(403, 'Solo un administrador global puede crear nuevas sedes.');
+    }
+
     const { name, address, city, phone = null, email = null, registration_date = null } = req.validated.body;
 
     const { rows } = await query(
@@ -74,6 +83,12 @@ router.put(
   ),
   asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
+    if (
+      !req.user.is_global_campus_access &&
+      !normalizeCampusIds(req.user.campus_ids).includes(Number(id))
+    ) {
+      throw new ApiError(403, 'No tiene acceso para modificar esta sede.');
+    }
     const { name, address, city, phone = null, email = null } = req.validated.body;
 
     const { rows } = await query(
@@ -103,6 +118,12 @@ router.delete(
   validate(campusIdSchema),
   asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
+    if (
+      !req.user.is_global_campus_access &&
+      !normalizeCampusIds(req.user.campus_ids).includes(Number(id))
+    ) {
+      throw new ApiError(403, 'No tiene acceso para eliminar esta sede.');
+    }
 
     const result = await query('DELETE FROM campuses WHERE id = $1', [id]);
     if (result.rowCount === 0) {

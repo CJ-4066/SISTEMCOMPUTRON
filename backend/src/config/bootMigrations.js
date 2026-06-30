@@ -172,6 +172,41 @@ const ensureTeacherBaseCampusColumn = async () => {
   await query(`CREATE INDEX IF NOT EXISTS idx_users_base_campus_id ON users(base_campus_id)`);
 };
 
+const ensureUserCampusesTable = async () => {
+  const usersExistsResult = await query(`SELECT to_regclass('public.users') AS table_name`);
+  const campusesExistsResult = await query(`SELECT to_regclass('public.campuses') AS table_name`);
+  if (!usersExistsResult.rows[0]?.table_name || !campusesExistsResult.rows[0]?.table_name) {
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS user_campuses (
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      campus_id BIGINT NOT NULL REFERENCES campuses(id) ON DELETE RESTRICT,
+      is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+      assigned_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, campus_id)
+    )
+  `);
+  await query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_user_campuses_primary
+     ON user_campuses(user_id)
+     WHERE is_primary`,
+  );
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_user_campuses_campus_user
+     ON user_campuses(campus_id, user_id)`,
+  );
+  await query(`
+    INSERT INTO user_campuses (user_id, campus_id, is_primary)
+    SELECT id, base_campus_id, TRUE
+    FROM users
+    WHERE base_campus_id IS NOT NULL
+    ON CONFLICT (user_id, campus_id) DO NOTHING
+  `);
+};
+
 const ensureUsersDocumentNumberColumn = async () => {
   const usersExistsResult = await query(`SELECT to_regclass('public.users') AS table_name`);
   const usersExists = Boolean(usersExistsResult.rows[0]?.table_name);
@@ -1139,6 +1174,7 @@ const runBootMigrations = async () => {
   await ensureStudentsAssignedCampusColumn();
   await ensureAlumnoRole();
   await ensureTeacherBaseCampusColumn();
+  await ensureUserCampusesTable();
   await ensureUsersDocumentNumberColumn();
   await ensureUsersContactColumns();
   await ensureUsersMustChangePasswordColumn();

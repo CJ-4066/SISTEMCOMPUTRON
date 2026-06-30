@@ -246,6 +246,28 @@ SET
 ALTER TABLE users
 ADD COLUMN IF NOT EXISTS base_campus_id BIGINT REFERENCES campuses(id) ON DELETE SET NULL;
 
+CREATE TABLE IF NOT EXISTS user_campuses (
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  campus_id BIGINT NOT NULL REFERENCES campuses(id) ON DELETE RESTRICT,
+  is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+  assigned_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, campus_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_user_campuses_primary
+  ON user_campuses(user_id)
+  WHERE is_primary;
+
+CREATE INDEX IF NOT EXISTS idx_user_campuses_campus_user
+  ON user_campuses(campus_id, user_id);
+
+INSERT INTO user_campuses (user_id, campus_id, is_primary)
+SELECT id, base_campus_id, TRUE
+FROM users
+WHERE base_campus_id IS NOT NULL
+ON CONFLICT (user_id, campus_id) DO NOTHING;
+
 ALTER TABLE users
 ADD COLUMN IF NOT EXISTS document_number VARCHAR(30);
 

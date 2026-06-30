@@ -14,12 +14,36 @@ const {
   invalidateUserPermissionCache,
 } = require('../services/permissions.service');
 const { invalidateCacheByPrefix } = require('../services/responseCache.service');
+const {
+  assertCampusIdsAllowed,
+  assertUserWithinActorScope,
+  normalizeCampusIds,
+  replaceUserCampuses,
+} = require('../services/userCampuses.service');
 
 const router = express.Router();
 const ROLE_NAMES = ['ADMIN', 'DOCENTE', 'SECRETARIADO', 'DIRECTOR', 'ALUMNO'];
 const invalidateTeacherReadCaches = () => {
   invalidateCacheByPrefix('teachers:list');
   invalidateCacheByPrefix('teachers:assignments:list');
+};
+const ensureUserHasCampusForRoles = async (userId, roles, db = { query }) => {
+  if ((roles || []).includes('ADMIN')) return;
+
+  const result = await db.query(
+    `SELECT 1
+     FROM users u
+     WHERE u.id = $1
+       AND (
+         u.base_campus_id IS NOT NULL
+         OR EXISTS (SELECT 1 FROM user_campuses uc WHERE uc.user_id = u.id)
+       )
+     LIMIT 1`,
+    [userId],
+  );
+  if (result.rowCount === 0) {
+    throw new ApiError(400, 'Asigne al menos una sede antes de retirar el rol ADMIN.');
+  }
 };
 
 const roleUpdateSchema = z.object({
@@ -126,12 +150,31 @@ const personalPermissionsUpdateSchema = z.object({
     permission_mode: z.enum(['ROLE', 'PERSONAL']).default('ROLE'),
     permissions: z.array(z.string().trim().min(3).max(120)).default([]),
     base_campus_id: z.coerce.number().int().positive().nullable().optional(),
+    campus_ids: z.array(z.coerce.number().int().positive()).max(100).optional(),
   }),
   params: z.object({ id: z.coerce.number().int().positive() }),
   query: z.object({}).optional(),
 });
 
 router.use(authenticate);
+
+router.get(
+  '/available-campuses',
+  authorizePermission('users.create', 'users.permissions.manage'),
+  asyncHandler(async (req, res) => {
+    const campusIds = normalizeCampusIds(req.user.campus_ids);
+    const { rows } = await query(
+      `SELECT id, name
+       FROM campuses
+       WHERE $1::boolean = TRUE
+          OR id = ANY($2::bigint[])
+       ORDER BY LOWER(name) ASC, id ASC`,
+      [req.user.is_global_campus_access, campusIds],
+    );
+
+    return res.json({ items: rows });
+  }),
+);
 
 router.get(
   '/',
@@ -156,6 +199,12 @@ router.get(
          AND (
            $2::bigint IS NULL
            OR u.base_campus_id = $2
+           OR EXISTS (
+             SELECT 1
+             FROM user_campuses uc_scope
+             WHERE uc_scope.user_id = u.id
+               AND uc_scope.campus_id = $2
+           )
            OR EXISTS (
              SELECT 1
              FROM students s_scope
@@ -210,6 +259,12 @@ router.get(
              OR u.base_campus_id = $2
              OR EXISTS (
                SELECT 1
+               FROM user_campuses uc_scope
+               WHERE uc_scope.user_id = u.id
+                 AND uc_scope.campus_id = $2
+             )
+             OR EXISTS (
+               SELECT 1
                FROM students s_scope
                JOIN enrollments e_scope ON e_scope.student_id = s_scope.id
                JOIN course_campus cc_scope ON cc_scope.id = e_scope.course_campus_id
@@ -248,6 +303,24 @@ router.get(
          fu.email,
          fu.base_campus_id,
          cp.name AS base_campus_name,
+         COALESCE(
+           (
+             SELECT ARRAY_AGG(uc.campus_id ORDER BY uc.is_primary DESC, c.name, uc.campus_id)
+             FROM user_campuses uc
+             JOIN campuses c ON c.id = uc.campus_id
+             WHERE uc.user_id = fu.id
+           ),
+           '{}'
+         ) AS campus_ids,
+         COALESCE(
+           (
+             SELECT ARRAY_AGG(c.name ORDER BY uc.is_primary DESC, c.name, uc.campus_id)
+             FROM user_campuses uc
+             JOIN campuses c ON c.id = uc.campus_id
+             WHERE uc.user_id = fu.id
+           ),
+           '{}'
+         ) AS campus_names,
          fu.permission_mode,
          fu.is_active,
          fu.created_at,
@@ -292,6 +365,8 @@ router.patch(
   asyncHandler(async (req, res) => {
     const userId = req.validated.params.id;
     const { roles } = req.validated.body;
+    await assertUserWithinActorScope(req.user, userId);
+    await ensureUserHasCampusForRoles(userId, roles);
 
     const userExists = await query('SELECT id FROM users WHERE id = $1', [userId]);
     if (userExists.rowCount === 0) {
@@ -333,6 +408,8 @@ router.patch(
   asyncHandler(async (req, res) => {
     const targetUserId = req.validated.params.id;
     const { role } = req.validated.body;
+    await assertUserWithinActorScope(req.user, targetUserId);
+    await ensureUserHasCampusForRoles(targetUserId, [role]);
 
     const adminRolesResult = await query(
       `SELECT r.name
@@ -381,6 +458,7 @@ router.patch(
   asyncHandler(async (req, res) => {
     const userId = req.validated.params.id;
     const { is_active } = req.validated.body;
+    await assertUserWithinActorScope(req.user, userId);
 
     const { rows } = await query(
       `UPDATE users
@@ -408,6 +486,7 @@ router.delete(
   validate(deleteUserSchema),
   asyncHandler(async (req, res) => {
     const userId = req.validated.params.id;
+    await assertUserWithinActorScope(req.user, userId);
 
     if (userId === req.user.id) {
       throw new ApiError(400, 'No puedes eliminar tu propio usuario.');
@@ -444,6 +523,7 @@ router.patch(
   asyncHandler(async (req, res) => {
     const userId = req.validated.params.id;
     const { first_name, last_name, email, password, document_number, phone, address } = req.validated.body;
+    await assertUserWithinActorScope(req.user, userId);
 
     const normalizedFirstName = first_name?.trim();
     const normalizedLastName = last_name?.trim();
@@ -595,6 +675,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const search = req.validated.query?.q?.trim() || null;
     const pageSize = req.validated.query?.page_size || 100;
+    const campusScopeId = parseCampusScopeId(req);
 
     const { rows } = await query(
       `SELECT
@@ -606,6 +687,24 @@ router.get(
          u.is_active,
          u.base_campus_id,
          cp.name AS base_campus_name,
+         COALESCE(
+           (
+             SELECT ARRAY_AGG(uc.campus_id ORDER BY uc.is_primary DESC, c.name, uc.campus_id)
+             FROM user_campuses uc
+             JOIN campuses c ON c.id = uc.campus_id
+             WHERE uc.user_id = u.id
+           ),
+           '{}'
+         ) AS campus_ids,
+         COALESCE(
+           (
+             SELECT ARRAY_AGG(c.name ORDER BY uc.is_primary DESC, c.name, uc.campus_id)
+             FROM user_campuses uc
+             JOIN campuses c ON c.id = uc.campus_id
+             WHERE uc.user_id = u.id
+           ),
+           '{}'
+         ) AS campus_names,
          u.permission_mode,
          COALESCE(ARRAY_AGG(DISTINCT r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS roles
        FROM users u
@@ -616,6 +715,16 @@ router.get(
          $1::text IS NULL
          OR CONCAT_WS(' ', u.first_name, u.last_name, u.document_number, u.email) ILIKE '%' || $1 || '%'
        )
+         AND (
+           $2::bigint IS NULL
+           OR u.base_campus_id = $2
+           OR EXISTS (
+             SELECT 1
+             FROM user_campuses uc_scope
+             WHERE uc_scope.user_id = u.id
+               AND uc_scope.campus_id = $2
+           )
+         )
        GROUP BY
          u.id,
          u.first_name,
@@ -627,8 +736,8 @@ router.get(
          cp.name,
          u.permission_mode
        ORDER BY LOWER(u.last_name) ASC, LOWER(u.first_name) ASC, u.id ASC
-       LIMIT $2`,
-      [search, pageSize],
+       LIMIT $3`,
+      [search, campusScopeId, pageSize],
     );
 
     return res.json({ items: rows });
@@ -638,11 +747,15 @@ router.get(
 router.get(
   '/permissions/campuses',
   authorizePermission('users.permissions.manage'),
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const campusIds = normalizeCampusIds(req.user.campus_ids);
     const { rows } = await query(
       `SELECT id, name
        FROM campuses
+       WHERE $1::boolean = TRUE
+          OR id = ANY($2::bigint[])
        ORDER BY LOWER(name) ASC, id ASC`,
+      [req.user.is_global_campus_access, campusIds],
     );
 
     return res.json({ items: rows });
@@ -655,6 +768,7 @@ router.get(
   validate(permissionUserDetailSchema),
   asyncHandler(async (req, res) => {
     const userId = req.validated.params.id;
+    await assertUserWithinActorScope(req.user, userId);
 
     const userResult = await query(
       `SELECT
@@ -666,6 +780,24 @@ router.get(
          u.is_active,
          u.base_campus_id,
          cp.name AS base_campus_name,
+         COALESCE(
+           (
+             SELECT ARRAY_AGG(uc.campus_id ORDER BY uc.is_primary DESC, c.name, uc.campus_id)
+             FROM user_campuses uc
+             JOIN campuses c ON c.id = uc.campus_id
+             WHERE uc.user_id = u.id
+           ),
+           '{}'
+         ) AS campus_ids,
+         COALESCE(
+           (
+             SELECT ARRAY_AGG(c.name ORDER BY uc.is_primary DESC, c.name, uc.campus_id)
+             FROM user_campuses uc
+             JOIN campuses c ON c.id = uc.campus_id
+             WHERE uc.user_id = u.id
+           ),
+           '{}'
+         ) AS campus_names,
          u.permission_mode,
          COALESCE(ARRAY_AGG(DISTINCT r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS roles
        FROM users u
@@ -718,22 +850,51 @@ router.put(
   asyncHandler(async (req, res) => {
     const userId = req.validated.params.id;
     const permissionMode = req.validated.body.permission_mode || 'ROLE';
-    const baseCampusId = req.validated.body.base_campus_id;
+    const requestedCampusIds =
+      req.validated.body.campus_ids !== undefined
+        ? normalizeCampusIds(req.validated.body.campus_ids)
+        : req.validated.body.base_campus_id !== undefined
+          ? normalizeCampusIds(
+              req.validated.body.base_campus_id ? [req.validated.body.base_campus_id] : [],
+            )
+          : undefined;
+    await assertUserWithinActorScope(req.user, userId);
     const normalizedCodes = Array.from(
       new Set((req.validated.body.permissions || []).map((code) => code.trim()).filter(Boolean)),
     );
 
     await withTransaction(async (tx) => {
-      const userExists = await tx.query(`SELECT id FROM users WHERE id = $1`, [userId]);
+      const userExists = await tx.query(
+        `SELECT
+           u.id,
+           COALESCE(
+             ARRAY_AGG(r.name) FILTER (WHERE r.name IS NOT NULL),
+             '{}'
+           ) AS roles
+         FROM users u
+         LEFT JOIN user_roles ur ON ur.user_id = u.id
+         LEFT JOIN roles r ON r.id = ur.role_id
+         WHERE u.id = $1
+         GROUP BY u.id`,
+        [userId],
+      );
       if (userExists.rowCount === 0) {
         throw new ApiError(404, 'Usuario no encontrado.');
       }
 
-      if (baseCampusId !== undefined && baseCampusId !== null) {
-        const campusExists = await tx.query(`SELECT id FROM campuses WHERE id = $1`, [baseCampusId]);
-        if (campusExists.rowCount === 0) {
-          throw new ApiError(404, 'La sede seleccionada no existe.');
-        }
+      if (requestedCampusIds !== undefined) {
+        const targetIsAdmin = (userExists.rows[0].roles || []).includes('ADMIN');
+        const allowedCampusIds = assertCampusIdsAllowed(req.user, requestedCampusIds, {
+          allowGlobal: targetIsAdmin,
+        });
+        await replaceUserCampuses(
+          {
+            userId,
+            campusIds: allowedCampusIds,
+            assignedBy: req.user.id,
+          },
+          tx,
+        );
       }
 
       let permissionIds = [];
@@ -754,15 +915,13 @@ router.put(
         permissionIds = permissionResult.rows.map((row) => row.id);
       }
 
-      const updateValues = [permissionMode];
-      let updateSql = `UPDATE users SET permission_mode = $1`;
-      if (baseCampusId !== undefined) {
-        updateValues.push(baseCampusId);
-        updateSql += `, base_campus_id = $${updateValues.length}`;
-      }
-      updateValues.push(userId);
-      updateSql += `, updated_at = NOW() WHERE id = $${updateValues.length}`;
-      await tx.query(updateSql, updateValues);
+      await tx.query(
+        `UPDATE users
+         SET permission_mode = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [permissionMode, userId],
+      );
 
       await tx.query(`DELETE FROM user_permissions WHERE user_id = $1`, [userId]);
 
@@ -783,7 +942,7 @@ router.put(
     const effectivePermissions = await getUserPermissionCodes(userId);
 
     return res.json({
-      message: 'Permisos personales y sede actualizados.',
+      message: 'Permisos personales y sedes actualizados.',
       meta: {
         permission_mode: permissionMode,
         effective_permissions_count: effectivePermissions.length,

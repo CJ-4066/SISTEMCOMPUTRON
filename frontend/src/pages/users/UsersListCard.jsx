@@ -169,7 +169,10 @@ export default function UsersListCard({
                 <td className="py-2 pr-3">{targetUser.document_number || '-'}</td>
                 <td className="py-2 pr-3">{targetUser.email}</td>
                 <td className="py-2 pr-3">
-                  {targetUser.base_campus_name || (getPrimaryRole(targetUser.roles) === 'ADMIN' ? 'Todas las sedes' : 'Sin sede')}
+                  {(targetUser.campus_names || []).length > 0
+                    ? targetUser.campus_names.join(', ')
+                    : targetUser.base_campus_name ||
+                      (getPrimaryRole(targetUser.roles) === 'ADMIN' ? 'Todas las sedes' : 'Sin sede')}
                 </td>
                 <td className="py-2 pr-3">
                   <div className="flex items-center gap-2">

@@ -47,7 +47,8 @@ const normalizeOptional = (value) => {
 export default function TeachersPage() {
   const { user, hasPermission } = useAuth();
   const userRoles = user?.roles || [];
-  const isRootAdminProfile = userRoles.includes('ADMIN') && !user?.base_campus_id;
+  const assignedCampusIds = user?.campus_ids || (user?.base_campus_id ? [user.base_campus_id] : []);
+  const isRootAdminProfile = userRoles.includes('ADMIN') && assignedCampusIds.length === 0;
   const canViewTeachers = hasPermission(PERMISSIONS.TEACHERS_VIEW);
   const canViewAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_VIEW);
   const canManageAssignments = hasPermission(PERMISSIONS.TEACHERS_ASSIGNMENTS_MANAGE);

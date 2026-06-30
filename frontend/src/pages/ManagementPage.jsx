@@ -285,7 +285,8 @@ export default function ManagementPage() {
   const canReadPayments = canViewPayments || canManagePayments;
   const canReadEnrollments = canViewEnrollments || canManageEnrollments;
   const userRoles = user?.roles || [];
-  const isRootAdminProfile = userRoles.includes('ADMIN');
+  const assignedCampusIds = user?.campus_ids || (user?.base_campus_id ? [user.base_campus_id] : []);
+  const isRootAdminProfile = userRoles.includes('ADMIN') && assignedCampusIds.length === 0;
   const canSelectEnrollmentCampus = Boolean(isRootAdminProfile && canManageEnrollments);
   const defaultTeacherCampusId = !isRootAdminProfile && user?.base_campus_id ? String(user.base_campus_id) : '';
   const canSelectTeacherCampus = Boolean(isRootAdminProfile && canReadCampuses);
