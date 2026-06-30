@@ -47,7 +47,7 @@ const emptyGuardian = {
 const STUDENT_RECENT_LIMIT = 10;
 
 export default function StudentsPage() {
-  const { user, hasPermission } = useAuth();
+  const { hasPermission } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [students, setStudents] = useState([]);

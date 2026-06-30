@@ -68,7 +68,6 @@ export default function TransfersManager({ title = 'Traslados de Alumnos', showH
   const [transferContext, setTransferContext] = useState(null);
   const [transferForm, setTransferForm] = useState(createTransferFormDefaults);
   const [showTransferForm, setShowTransferForm] = useState(false);
-  const [loadingTransferOptions, setLoadingTransferOptions] = useState(false);
   const [submittingTransfer, setSubmittingTransfer] = useState(false);
   const [reviewingTransferId, setReviewingTransferId] = useState(null);
   const [transferMessage, setTransferMessage] = useState('');
@@ -247,7 +246,6 @@ export default function TransfersManager({ title = 'Traslados de Alumnos', showH
     setTransferContext(null);
     setTransferForm(createTransferFormDefaults());
     setShowTransferForm(false);
-    setLoadingTransferOptions(false);
   };
 
   const selectTransferStudent = async (student) => {

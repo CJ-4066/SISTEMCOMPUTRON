@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -27,10 +27,6 @@ export default function PaymentsTrendCard({
     setActiveIndex((current) => Math.min(current, items.length - 1));
   }, [items]);
 
-  const maxAmount = useMemo(
-    () => Math.max(...items.map((item) => Number(item.completed_amount || 0)), 0),
-    [items],
-  );
   const activeItem = items[activeIndex] || null;
 
   return (

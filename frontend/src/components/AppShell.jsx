@@ -20,7 +20,6 @@ import {
   UsersRound,
   Wallet,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
 import { MANAGEMENT_SECTION_ITEMS, buildManagementSectionPath } from '../constants/managementSections';
@@ -30,17 +29,6 @@ import { preloadCoreRoutes, preloadRoute } from '../utils/routePreload';
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, permissions: [PERMISSIONS.DASHBOARD_VIEW] },
   { to: '/users', label: 'Usuarios', icon: UsersRound, permissions: [PERMISSIONS.USERS_VIEW] },
-];
-
-const postAcademicaItems = [
-  { to: '/payments', label: 'Reporte de pagos', icon: ReceiptText, permissions: [PERMISSIONS.PAYMENTS_VIEW] },
-  {
-    to: '/certificate-library',
-    label: 'Biblioteca de certificados',
-    icon: FileBadge,
-    permissions: [PERMISSIONS.PAYMENTS_VIEW, PERMISSIONS.PAYMENTS_MANAGE],
-  },
-  { to: '/certificates', label: 'Certificados', icon: ShieldCheck, permissions: [PERMISSIONS.PAYMENTS_VIEW] },
 ];
 
 const aulaVirtualItems = [
@@ -549,17 +537,7 @@ export default function AppShell() {
         </header>
 
         <main className={isCertificatesRoute ? 'w-full min-w-0 p-2 md:p-3' : 'mx-auto w-full max-w-7xl min-w-0 p-3 sm:p-4 md:p-6'}>
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-            >
-              <Outlet />
-            </motion.div>
-          </AnimatePresence>
+          <Outlet key={location.pathname} />
         </main>
       </div>
 

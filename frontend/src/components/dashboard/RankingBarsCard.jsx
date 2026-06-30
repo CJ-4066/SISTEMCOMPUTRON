@@ -1,5 +1,5 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell } from 'recharts';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatCurrency } from './dashboardUtils';
 
 export default function RankingBarsCard({
@@ -18,11 +18,6 @@ export default function RankingBarsCard({
 
     setActiveIndex((current) => Math.min(current, items.length - 1));
   }, [items]);
-
-  const maxValue = useMemo(
-    () => Math.max(...items.map((item) => Number(item.pending_amount || 0)), 0),
-    [items],
-  );
 
   return (
     <article className="card space-y-4">

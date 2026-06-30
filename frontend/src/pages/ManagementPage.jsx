@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState, useTransition } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -285,7 +285,7 @@ export default function ManagementPage() {
   const canReadPayments = canViewPayments || canManagePayments;
   const canReadEnrollments = canViewEnrollments || canManageEnrollments;
   const userRoles = user?.roles || [];
-  const isRootAdminProfile = userRoles.includes('ADMIN') && !user?.base_campus_id;
+  const isRootAdminProfile = userRoles.includes('ADMIN');
   const canSelectEnrollmentCampus = Boolean(isRootAdminProfile && canManageEnrollments);
   const defaultTeacherCampusId = !isRootAdminProfile && user?.base_campus_id ? String(user.base_campus_id) : '';
   const canSelectTeacherCampus = Boolean(isRootAdminProfile && canReadCampuses);
@@ -351,6 +351,7 @@ export default function ManagementPage() {
   const [recentEnrollments, setRecentEnrollments] = useState([]);
   const [teacherAssignments, setTeacherAssignments] = useState([]);
   const [paymentConcepts, setPaymentConcepts] = useState([]);
+  const paymentConceptsLoadAttemptedRef = useRef(false);
 
   const [studentForm, setStudentForm] = useState(createStudentDefaults);
   const [teacherForm, setTeacherForm] = useState(createTeacherFormDefaults);
@@ -409,7 +410,7 @@ export default function ManagementPage() {
 
       setSearchParams(nextParams, { replace });
     },
-    [navigate, resolveTabKey, searchParams, setSearchParams],
+    [resolveTabKey, searchParams, setSearchParams],
   );
 
   useEffect(() => {
@@ -602,14 +603,16 @@ export default function ManagementPage() {
 
     setLoadingCampuses(true);
     try {
-      const response = await api.get('/campuses');
+      const response = await api.get('/campuses', {
+        ...(isRootAdminProfile ? { _skipCampusScope: true } : {}),
+      });
       setCampuses(response.data?.items || []);
     } catch (requestError) {
       toast.error(requestError.response?.data?.message || 'No se pudieron cargar las sedes.');
     } finally {
       setLoadingCampuses(false);
     }
-  }, [canReadCampuses]);
+  }, [canReadCampuses, isRootAdminProfile]);
 
   const loadPeriods = useCallback(async () => {
     if (!canViewPeriods) {
@@ -701,8 +704,14 @@ export default function ManagementPage() {
       return;
     }
 
+    if (paymentConceptsLoadAttemptedRef.current) {
+      return;
+    }
+
+    paymentConceptsLoadAttemptedRef.current = true;
+
     try {
-      const response = await api.get('/payments/concepts');
+      const response = await api.get('/catalogs/payment-concepts');
       setPaymentConcepts(response.data?.items || []);
     } catch (requestError) {
       toast.error(requestError.response?.data?.message || 'No se pudieron cargar los conceptos de pago.');
@@ -1073,6 +1082,16 @@ export default function ManagementPage() {
   }, [courses]);
 
   const enrollmentCampusOptions = useMemo(() => {
+    if (campuses.length > 0) {
+      return campuses
+        .map((campus) => ({
+          id: Number(campus.id),
+          name: campus.name || `Sede #${campus.id}`,
+        }))
+        .filter((campus) => Number.isFinite(campus.id) && campus.id > 0)
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es', { sensitivity: 'base' }));
+    }
+
     const map = new Map();
     for (const offering of enrollmentOfferingOptions) {
       const campusId = Number(offering.campus_id || 0);
@@ -1082,10 +1101,8 @@ export default function ManagementPage() {
         name: offering.campus_name || `Sede #${campusId}`,
       });
     }
-    return Array.from(map.values()).sort((a, b) =>
-      String(a.name).localeCompare(String(b.name), 'es', { sensitivity: 'base' }),
-    );
-  }, [enrollmentOfferingOptions]);
+    return Array.from(map.values()).sort((a, b) => String(a.name).localeCompare(String(b.name), 'es', { sensitivity: 'base' }));
+  }, [campuses, enrollmentOfferingOptions]);
 
   const teacherAssignmentCampusOptions = useMemo(() => {
     if (campuses.length > 0) {

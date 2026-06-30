@@ -3,6 +3,17 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
   darkMode: 'class',
   theme: {
+    boxShadow: {
+      sm: 'none',
+      DEFAULT: 'none',
+      md: 'none',
+      lg: 'none',
+      xl: 'none',
+      '2xl': 'none',
+      inner: 'none',
+      none: 'none',
+      soft: 'none',
+    },
     extend: {
       colors: {
         primary: {
@@ -32,9 +43,6 @@ export default {
       },
       fontFamily: {
         sans: ['Poppins', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-      },
-      boxShadow: {
-        soft: '0 12px 28px rgba(28, 104, 93, 0.14)',
       },
     },
   },

@@ -54,6 +54,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let active = true;
+    const isAdminUser = (user) => Array.isArray(user?.roles) && user.roles.includes('ADMIN');
 
     const bootstrap = async () => {
       const currentAuth = authRef.current;
@@ -90,8 +91,11 @@ export function AuthProvider({ children }) {
 
         const meResponse = await api.get('/auth/me');
         if (active) {
-          setAuth((prev) => ({ ...prev, user: meResponse.data.user }));
-          if (!getCampusScopeId() && meResponse.data?.user?.base_campus_id) {
+          const nextUser = meResponse.data.user;
+          setAuth((prev) => ({ ...prev, user: nextUser }));
+          if (isAdminUser(nextUser)) {
+            setCampusScopeId(null);
+          } else if (!getCampusScopeId() && nextUser?.base_campus_id) {
             setCampusScopeId(meResponse.data.user.base_campus_id);
           }
         }
@@ -126,7 +130,9 @@ export function AuthProvider({ children }) {
         user: response.data.user,
       });
       setAuthToken(response.data.access_token);
-      if (!getCampusScopeId() && response.data?.user?.base_campus_id) {
+      if (Array.isArray(response.data?.user?.roles) && response.data.user.roles.includes('ADMIN')) {
+        setCampusScopeId(null);
+      } else if (!getCampusScopeId() && response.data?.user?.base_campus_id) {
         setCampusScopeId(response.data.user.base_campus_id);
       }
       return { ok: true };

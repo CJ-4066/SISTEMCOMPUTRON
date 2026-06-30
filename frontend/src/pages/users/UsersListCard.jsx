@@ -1,4 +1,3 @@
-import { motion, AnimatePresence } from 'framer-motion';
 import PaginationControls from '../../components/PaginationControls';
 import { ROLE_FILTER_OPTIONS, USER_PAGE_SIZE } from './constants';
 import { getPrimaryRole } from './helpers';
@@ -52,29 +51,22 @@ export default function UsersListCard({
 
   return (
     <article className="card overflow-x-auto relative">
-      <AnimatePresence>
-        {hasSelection && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="absolute left-0 right-0 top-0 z-10 flex items-center justify-between border-b border-primary-200 bg-primary-50 px-4 py-2 dark:bg-slate-800"
-          >
-            <span className="text-sm font-semibold text-primary-800 dark:text-primary-200">
-              {selectedUserIds.length} usuarios seleccionados
-            </span>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={onDeleteSelected}
-                className="rounded-lg bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
-              >
-                Eliminar seleccionados
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {hasSelection ? (
+        <div className="absolute left-0 right-0 top-0 z-10 flex items-center justify-between border-b border-primary-200 bg-primary-50 px-4 py-2 dark:bg-slate-800">
+          <span className="text-sm font-semibold text-primary-800 dark:text-primary-200">
+            {selectedUserIds.length} usuarios seleccionados
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onDeleteSelected}
+              className="rounded-lg bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
+            >
+              Eliminar seleccionados
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Usuarios registrados</h2>

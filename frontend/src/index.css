@@ -165,7 +165,7 @@ input[type='time'] {
 .grades-panel {
   border-color: rgba(168, 233, 219, 0.72);
   background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 16px 36px rgba(28, 104, 93, 0.12);
+  box-shadow: none;
 }
 
 .grades-panel-title {
@@ -200,7 +200,7 @@ input[type='time'] {
 
 .grades-btn-primary {
   background: linear-gradient(130deg, #1f8273, #2ca38f);
-  box-shadow: 0 8px 18px rgba(31, 130, 115, 0.28);
+  box-shadow: none;
 }
 
 .grades-btn-primary:hover {
@@ -210,7 +210,7 @@ input[type='time'] {
 
 .grades-btn-accent {
   background: linear-gradient(130deg, #dd670f, #f98617);
-  box-shadow: 0 8px 18px rgba(221, 103, 15, 0.26);
+  box-shadow: none;
 }
 
 .grades-btn-accent:hover {

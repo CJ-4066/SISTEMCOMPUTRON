@@ -6,6 +6,7 @@ import AppShell from './components/AppShell';
 import { ThemeProvider } from './context/ThemeContext';
 import { Toaster } from 'sonner';
 import { ConfirmationProvider } from './context/ConfirmationContext';
+import AppErrorBoundary from './components/AppErrorBoundary';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const ForcePasswordChangePage = lazy(() => import('./pages/ForcePasswordChangePage'));
@@ -35,10 +36,11 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <ConfirmationProvider>
-          <Toaster position="top-right" richColors closeButton />
-          <BrowserRouter>
-            <Routes>
+          <ConfirmationProvider>
+            <Toaster position="top-right" richColors closeButton />
+          <AppErrorBoundary>
+            <BrowserRouter>
+              <Routes>
               <Route
                 path="/login"
                 element={
@@ -186,8 +188,9 @@ export default function App() {
               </Route>
 
               <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </BrowserRouter>
+              </Routes>
+            </BrowserRouter>
+          </AppErrorBoundary>
         </ConfirmationProvider>
       </AuthProvider>
     </ThemeProvider>
