@@ -993,6 +993,20 @@ const ensureCertificateLibraryTable = async () => {
   `);
 
   await query(`ALTER TABLE certificate_library ADD COLUMN IF NOT EXISTS validation_token VARCHAR(64) UNIQUE`);
+  const certificatesWithoutToken = await query(
+    `SELECT id
+     FROM certificate_library
+     WHERE validation_token IS NULL`,
+  );
+  for (const row of certificatesWithoutToken.rows) {
+    await query(
+      `UPDATE certificate_library
+       SET validation_token = $1
+       WHERE id = $2
+         AND validation_token IS NULL`,
+      [randomBytes(24).toString('hex'), row.id],
+    );
+  }
   await query(`
     CREATE UNIQUE INDEX IF NOT EXISTS ux_certificate_library_token
     ON certificate_library(validation_token)

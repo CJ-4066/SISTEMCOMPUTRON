@@ -3,6 +3,7 @@ const { z } = require('zod');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
 const { query } = require('../config/db');
+const env = require('../config/env');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
 const validate = require('../middlewares/validate');
@@ -16,6 +17,39 @@ const {
 const router = express.Router();
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const VALIDATION_TOKEN_PATTERN = /^[a-f0-9]{32,64}$/i;
+
+const resolveCertificateFrontendOrigin = (req) => {
+  const candidates = [
+    env.frontendUrl,
+    req.get('Origin'),
+    req.get('Referer'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      return new URL(candidate).origin;
+    } catch (_error) {
+      // Continúa con el siguiente origen disponible.
+    }
+  }
+
+  const forwardedProtocol = String(req.get('X-Forwarded-Proto') || '')
+    .split(',')[0]
+    .trim();
+  const forwardedHost = String(req.get('X-Forwarded-Host') || '')
+    .split(',')[0]
+    .trim();
+  const protocol = forwardedProtocol || req.protocol;
+  const host = forwardedHost || req.get('host');
+  return `${protocol}://${host}`;
+};
+
+const buildCertificateVerificationUrl = (req, token) =>
+  new URL(
+    `/verificar/${encodeURIComponent(token)}`,
+    resolveCertificateFrontendOrigin(req),
+  ).toString();
 
 const toNullableTrimmedString = (value) => {
   if (value === undefined || value === null) return null;
@@ -88,7 +122,9 @@ router.get(
   '/verify/:token',
   asyncHandler(async (req, res) => {
     const token = req.params.token;
-    if (!token) throw new ApiError(400, 'Token de validación requerido');
+    if (!VALIDATION_TOKEN_PATTERN.test(token || '')) {
+      throw new ApiError(400, 'Token de validación inválido');
+    }
 
     const result = await query(
       `SELECT
@@ -113,7 +149,10 @@ router.get(
       throw new ApiError(404, 'Certificado no encontrado o token inválido');
     }
 
-    return res.json({ item: result.rows[0] });
+    return res.json({
+      item: result.rows[0],
+      verification_url: buildCertificateVerificationUrl(req, token),
+    });
   }),
 );
 
@@ -121,25 +160,36 @@ router.get(
   '/verify/:token/qr',
   asyncHandler(async (req, res) => {
     const token = req.params.token;
-    if (!token) throw new ApiError(400, 'Token requerido');
+    if (!VALIDATION_TOKEN_PATTERN.test(token || '')) {
+      throw new ApiError(400, 'Token de validación inválido');
+    }
 
-    // To prevent scraping or generating QR for invalid tokens, we could verify existence,
-    // but building the QR locally is fast and harmless. 
-    // We will return the QR image for the frontend verification URL.
-    
-    // Front-end URL structure: Protocol + Host + /verificar/[token]
-    // Since we don't know the exact host here, the front-end might generate it directly,
-    // or we can pass a URL parameter "frontend_host" if needed.
-    // However, since we are returning an image, the safest is to generate the URL
-    // assuming it runs on the origin that requests it. Wait, the frontend can just
-    // use a canvas library to generate it! Let's provide this endpoint anyway.
-    
-    // Defaulting to the domain where it's deployed or the request origin
-    const host = req.get('Origin') || req.get('Referer') || (`${req.protocol}://${req.get('host')}`);
-    const verificationUrl = `${host}/verificar/${token}`;
+    const certificateResult = await query(
+      `SELECT 1
+       FROM certificate_library
+       WHERE validation_token = $1
+       LIMIT 1`,
+      [token],
+    );
+    if (certificateResult.rowCount === 0) {
+      throw new ApiError(404, 'Certificado no encontrado o token inválido');
+    }
+
+    const verificationUrl = buildCertificateVerificationUrl(req, token);
 
     try {
-      const qrImageBuffer = await QRCode.toBuffer(verificationUrl, { type: 'png', margin: 1, width: 300 });
+      const qrImageBuffer = await QRCode.toBuffer(verificationUrl, {
+        type: 'png',
+        margin: 2,
+        width: 280,
+        errorCorrectionLevel: 'H',
+        color: {
+          dark: '#102F4B',
+          light: '#FFFFFF',
+        },
+      });
+      res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      res.set('X-Certificate-Verification-Url', verificationUrl);
       res.type('image/png');
       return res.send(qrImageBuffer);
     } catch (e) {
@@ -263,6 +313,7 @@ router.get(
          cl.city,
          cl.organization,
          cl.campus_id,
+         cl.validation_token,
          cp.name AS campus_name,
          cl.created_by,
          CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS created_by_name,
