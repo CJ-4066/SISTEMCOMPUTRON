@@ -616,7 +616,7 @@ export default function ManagementPage() {
   }, [canReadCampuses, isRootAdminProfile]);
 
   const loadPeriods = useCallback(async () => {
-    if (!canViewPeriods) {
+    if (!canReadPeriods) {
       setPeriods([]);
       return;
     }
@@ -627,7 +627,7 @@ export default function ManagementPage() {
     } catch (requestError) {
       toast.error(requestError.response?.data?.message || 'No se pudieron cargar los periodos.');
     }
-  }, [canViewPeriods]);
+  }, [canReadPeriods]);
 
   const loadTeacherAssignments = useCallback(
     async ({ full = false, courseCampusIds = [] } = {}) => {
@@ -794,7 +794,7 @@ export default function ManagementPage() {
       loadCourses();
     }
 
-    if (canManageAssignments && canViewPeriods && periods.length === 0) {
+    if (canManageAssignments && canReadPeriods && periods.length === 0) {
       loadPeriods();
     }
   }, [
@@ -802,7 +802,7 @@ export default function ManagementPage() {
     canManageAssignments,
     canReadCampuses,
     canReadCourses,
-    canViewPeriods,
+    canReadPeriods,
     hasFullCoursesLoaded,
     isTeachersTabActive,
     loadCampuses,
@@ -822,9 +822,9 @@ export default function ManagementPage() {
 
   useEffect(() => {
     if (!isPeriodsTabActive) return;
-    if (!canViewPeriods || periods.length > 0) return;
+    if (!canReadPeriods || periods.length > 0) return;
     loadPeriods();
-  }, [canViewPeriods, isPeriodsTabActive, loadPeriods, periods.length]);
+  }, [canReadPeriods, isPeriodsTabActive, loadPeriods, periods.length]);
 
   useEffect(() => {
     if (!isCoursesTabActive || !canReadCourses) return;
@@ -933,7 +933,7 @@ export default function ManagementPage() {
       loadCampuses();
     }
 
-    if (canViewPeriods && periods.length === 0) {
+    if (canReadPeriods && periods.length === 0) {
       loadPeriods();
     }
 
@@ -951,7 +951,7 @@ export default function ManagementPage() {
     canReadCourses,
     canViewAssignments,
     canViewPaymentConcepts,
-    canViewPeriods,
+    canReadPeriods,
     hasFullCoursesLoaded,
     campuses.length,
     isStudentsTabActive,
@@ -1237,10 +1237,9 @@ export default function ManagementPage() {
   );
 
   const selectedEnrollmentPeriodName = useMemo(() => {
-    if (selectedEnrollmentAssignment?.period_name) return selectedEnrollmentAssignment.period_name;
-
     const selectedPeriod = periods.find((period) => String(period.id) === String(studentForm.period_id));
-    return selectedPeriod?.name || '-';
+    if (selectedPeriod?.name) return selectedPeriod.name;
+    return selectedEnrollmentAssignment?.period_name || '-';
   }, [periods, selectedEnrollmentAssignment?.period_name, studentForm.period_id]);
 
   const selectedEnrollmentCampusName = useMemo(() => {
@@ -1315,21 +1314,15 @@ export default function ManagementPage() {
   const installmentConceptId = conceptIdsByName.MENSUALIDAD || null;
 
   useEffect(() => {
-    if (editingStudentId) return;
-    if (!studentForm.course_campus_id) return;
+    if (!showStudentForm || editingStudentId || studentForm.period_id || !defaultPeriodId) return;
 
-    const assignment = assignmentByOfferingId.get(String(studentForm.course_campus_id)) || null;
-    const nextPeriodId = assignment?.period_id ? String(assignment.period_id) : defaultPeriodId;
-    if (!nextPeriodId) return;
-
-    if (String(studentForm.period_id) !== String(nextPeriodId)) {
-      setStudentForm((prev) => ({ ...prev, period_id: String(nextPeriodId) }));
-    }
+    setStudentForm((prev) =>
+      prev.period_id ? prev : { ...prev, period_id: String(defaultPeriodId) },
+    );
   }, [
-    assignmentByOfferingId,
     defaultPeriodId,
     editingStudentId,
-    studentForm.course_campus_id,
+    showStudentForm,
     studentForm.period_id,
   ]);
 
@@ -1629,9 +1622,7 @@ export default function ManagementPage() {
             }
           }
 
-          const resolvedPeriodId = Number(
-            studentForm.period_id || selectedEnrollmentAssignment?.period_id || defaultPeriodId,
-          );
+          const resolvedPeriodId = Number(studentForm.period_id || defaultPeriodId);
           if (!resolvedPeriodId) {
             throw new Error('No se encontró un periodo válido para la matrícula.');
           }
@@ -2666,7 +2657,21 @@ export default function ManagementPage() {
 
                         <label className="space-y-1">
                           <span className="text-xs font-semibold text-primary-700">Periodo</span>
-                          <input className="app-input" value={selectedEnrollmentPeriodName} readOnly />
+                          <select
+                            className="app-input"
+                            value={studentForm.period_id}
+                            onChange={(event) =>
+                              setStudentForm((prev) => ({ ...prev, period_id: event.target.value }))
+                            }
+                            required
+                          >
+                            <option value="">Selecciona periodo</option>
+                            {periods.map((period) => (
+                              <option key={period.id} value={period.id}>
+                                {period.name}{period.is_active ? '' : ' (Inactivo)'}
+                              </option>
+                            ))}
+                          </select>
                         </label>
                       </div>
 

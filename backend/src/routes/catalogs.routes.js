@@ -12,7 +12,7 @@ router.use(authenticate);
 
 router.get(
   '/periods',
-  authorizePermission('periods.view'),
+  authorizePermission('periods.view', 'periods.manage'),
   asyncHandler(async (_req, res) => {
     const { rows } = await query(
       `SELECT id, name, start_date, end_date, is_active, created_at
