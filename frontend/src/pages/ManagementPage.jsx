@@ -6,7 +6,7 @@ import { useConfirmation } from '../context/ConfirmationContext';
 import { toast } from 'sonner';
 import { MANAGEMENT_SECTION_ITEMS } from '../constants/managementSections';
 import { PERMISSIONS } from '../constants/permissions';
-import { calculateAgeFromBirthDate, formatAgeLabel } from '../utils/age';
+import { calculateAgeFromBirthDate, formatAgeLabel, normalizeDateOnly } from '../utils/age';
 import { buildDocumentValue, DOCUMENT_TYPE_OPTIONS, parseDocumentValue } from '../utils/document';
 import PaginationControls from '../components/PaginationControls';
 import CertificateGeneratorLauncher from '../components/certificates/CertificateGeneratorLauncher';
@@ -1737,7 +1737,7 @@ export default function ManagementPage() {
       last_name: student.last_name || '',
       document_type: parsedDocument.document_type,
       document_number: parsedDocument.document_number,
-      birth_date: student.birth_date || '',
+      birth_date: normalizeDateOnly(student.birth_date),
       email: student.email || '',
       phone: student.phone || '',
       address: student.address || '',

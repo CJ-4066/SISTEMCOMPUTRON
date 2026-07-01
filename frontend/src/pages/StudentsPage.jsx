@@ -4,7 +4,7 @@ import { ArrowLeftRight, GraduationCap, UsersRound } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../constants/permissions';
-import { calculateAgeFromBirthDate, formatAgeLabel } from '../utils/age';
+import { calculateAgeFromBirthDate, formatAgeLabel, normalizeDateOnly } from '../utils/age';
 import { buildDocumentValue, DOCUMENT_TYPE_OPTIONS, parseDocumentValue } from '../utils/document';
 import TransfersManager from './transfers/TransfersManager';
 
@@ -421,7 +421,7 @@ export default function StudentsPage() {
       last_name: student.last_name || '',
       document_type: parsedDocument.document_type,
       document_number: parsedDocument.document_number,
-      birth_date: student.birth_date || '',
+      birth_date: normalizeDateOnly(student.birth_date),
       email: student.email || '',
       phone: student.phone || '',
       address: student.address || '',
