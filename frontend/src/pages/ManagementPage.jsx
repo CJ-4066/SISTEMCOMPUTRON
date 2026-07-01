@@ -390,6 +390,7 @@ export default function ManagementPage() {
   const [loadingCourses, setLoadingCourses] = useState(false);
   const [loadingTeacherAssignments, setLoadingTeacherAssignments] = useState(false);
   const [loadingCampuses, setLoadingCampuses] = useState(false);
+  const [loadingPeriods, setLoadingPeriods] = useState(false);
   const [loadingEnrollments, setLoadingEnrollments] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hasFullTeacherAssignmentsLoaded, setHasFullTeacherAssignmentsLoaded] = useState(false);
@@ -621,11 +622,14 @@ export default function ManagementPage() {
       return;
     }
 
+    setLoadingPeriods(true);
     try {
       const response = await api.get('/catalogs/periods');
       setPeriods(response.data?.items || []);
     } catch (requestError) {
       toast.error(requestError.response?.data?.message || 'No se pudieron cargar los periodos.');
+    } finally {
+      setLoadingPeriods(false);
     }
   }, [canReadPeriods]);
 
@@ -794,7 +798,7 @@ export default function ManagementPage() {
       loadCourses();
     }
 
-    if (canManageAssignments && canReadPeriods && periods.length === 0) {
+    if (canManageAssignments && canReadPeriods && !loadingPeriods && periods.length === 0) {
       loadPeriods();
     }
   }, [
@@ -808,6 +812,7 @@ export default function ManagementPage() {
     loadCampuses,
     loadCourses,
     loadPeriods,
+    loadingPeriods,
     loadingCampuses,
     loadingCourses,
     periods.length,
@@ -822,9 +827,9 @@ export default function ManagementPage() {
 
   useEffect(() => {
     if (!isPeriodsTabActive) return;
-    if (!canReadPeriods || periods.length > 0) return;
+    if (!canReadPeriods || loadingPeriods || periods.length > 0) return;
     loadPeriods();
-  }, [canReadPeriods, isPeriodsTabActive, loadPeriods, periods.length]);
+  }, [canReadPeriods, isPeriodsTabActive, loadPeriods, loadingPeriods, periods.length]);
 
   useEffect(() => {
     if (!isCoursesTabActive || !canReadCourses) return;
@@ -890,7 +895,7 @@ export default function ManagementPage() {
       loadCampuses();
     }
 
-    if (canReadPeriods && periods.length === 0) {
+    if (canReadPeriods && !loadingPeriods && periods.length === 0) {
       loadPeriods();
     }
 
@@ -915,6 +920,7 @@ export default function ManagementPage() {
     loadPeriods,
     loadTeacherAssignments,
     loadTeachers,
+    loadingPeriods,
     loadingCampuses,
     loadingTeacherAssignments,
     loadingTeachers,
@@ -933,7 +939,7 @@ export default function ManagementPage() {
       loadCampuses();
     }
 
-    if (canReadPeriods && periods.length === 0) {
+    if (canReadPeriods && !loadingPeriods && periods.length === 0) {
       loadPeriods();
     }
 
@@ -962,6 +968,7 @@ export default function ManagementPage() {
     loadTeacherAssignments,
     loadingCampuses,
     loadingCourses,
+    loadingPeriods,
     loadingTeacherAssignments,
     paymentConcepts.length,
     periods.length,
