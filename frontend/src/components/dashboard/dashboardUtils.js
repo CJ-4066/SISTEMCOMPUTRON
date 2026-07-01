@@ -6,6 +6,7 @@ const PAYMENT_STATUS_LABELS = {
 
 const PAYMENT_METHOD_LABELS = {
   YAPE: 'Yape',
+  PLIN: 'Plin',
   TRANSFERENCIA: 'Transferencia',
   QR: 'QR',
   TARJETA: 'Tarjeta',

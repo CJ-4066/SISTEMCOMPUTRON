@@ -47,6 +47,32 @@ const normalizeReceiptFormat = (value) => {
   return raw === 'F1' ? 'F1' : 'F2';
 };
 
+const RECEIPT_DOCUMENT_METADATA = {
+  BOLETA: {
+    title: 'Boleta de venta',
+    customerDocumentLabel: 'DNI / CE',
+    notice: 'Documento generado por el sistema para el control del pago.',
+  },
+  FACTURA: {
+    title: 'Factura',
+    customerDocumentLabel: 'R.U.C.',
+    notice:
+      'Documento generado por el sistema. Su validez tributaria depende de la emisión electrónica mediante SUNAT.',
+  },
+  RECIBO_INTERNO: {
+    title: 'Recibo interno',
+    customerDocumentLabel: 'Documento',
+    notice: 'Documento interno de control. No es un comprobante de pago electrónico.',
+  },
+};
+
+const normalizeReceiptDocumentType = (value) => {
+  const raw = String(value || '')
+    .trim()
+    .toUpperCase();
+  return RECEIPT_DOCUMENT_METADATA[raw] ? raw : 'BOLETA';
+};
+
 const toWordsBelowHundred = (n) => {
   const units = [
     'cero',
@@ -202,11 +228,14 @@ const buildQrBoxContent = (qrImageDataUrl, validationUrl) => {
 
 const buildReceiptHtml = ({
   format = 'F2',
+  documentType = 'BOLETA',
   documentNumber,
   issueDate,
   issuedBy,
   classroomLabel,
   customerName,
+  customerDocument,
+  customerAddress,
   studentName,
   studentDocument,
   details = [],
@@ -218,6 +247,8 @@ const buildReceiptHtml = ({
   rucNumber = '20508338288',
 }) => {
   const selectedFormat = normalizeReceiptFormat(format);
+  const selectedDocumentType = normalizeReceiptDocumentType(documentType);
+  const documentMetadata = RECEIPT_DOCUMENT_METADATA[selectedDocumentType];
   const template = loadTemplateByFormat(selectedFormat);
   const normalizedDetails = details.map(normalizeDetailItem);
   const totalNumeric = Number(totalAmount || 0);
@@ -227,14 +258,24 @@ const buildReceiptHtml = ({
 
   const isCanceled = Math.abs(saldoNumeric) < 0.000001;
   const statusLabel = isCanceled ? 'CANCELADO' : 'PENDIENTE';
+  const safeCustomerAddress = String(customerAddress || '').trim();
 
   const replacements = {
+    DOCUMENT_TITLE: escapeHtml(documentMetadata.title),
     DOCUMENT_NUMBER: escapeHtml(documentNumber || '-'),
     ISSUE_DATE: escapeHtml(dateParts.date),
     ISSUE_TIME: escapeHtml(dateParts.time),
     ISSUED_BY: escapeHtml(issuedBy || '-'),
     CLASSROOM_LABEL: escapeHtml(classroomLabel || '-'),
     CUSTOMER_NAME: escapeHtml(customerName || studentName || '-'),
+    CUSTOMER_DOCUMENT_LABEL: escapeHtml(documentMetadata.customerDocumentLabel),
+    CUSTOMER_DOCUMENT: escapeHtml(customerDocument || studentDocument || '-'),
+    CUSTOMER_ADDRESS_ROW_F1: safeCustomerAddress
+      ? `<p class="line">Direccion: ${escapeHtml(safeCustomerAddress)}</p>`
+      : '',
+    CUSTOMER_ADDRESS_ROW_F2: safeCustomerAddress
+      ? `<p class="info-line"><span><strong>Direccion:</strong> ${escapeHtml(safeCustomerAddress)}</span></p>`
+      : '',
     STUDENT_NAME: escapeHtml(studentName || '-'),
     STUDENT_DOCUMENT: escapeHtml(studentDocument || '-'),
     DETAIL_ROWS_F1: buildDetailRowsForF1(normalizedDetails),
@@ -252,6 +293,7 @@ const buildReceiptHtml = ({
     VALIDATION_URL: escapeHtml(validationUrl),
     QR_BOX_CONTENT: buildQrBoxContent(qrImageDataUrl, validationUrl),
     RUC_NUMBER: escapeHtml(rucNumber),
+    DOCUMENT_NOTICE: escapeHtml(documentMetadata.notice),
   };
 
   return replaceTokens(template, replacements);
@@ -259,6 +301,7 @@ const buildReceiptHtml = ({
 
 module.exports = {
   buildReceiptHtml,
+  normalizeReceiptDocumentType,
   normalizeReceiptFormat,
   toCurrency,
 };

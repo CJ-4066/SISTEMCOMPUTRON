@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Boleta Electronica {{DOCUMENT_NUMBER}}</title>
+    <title>{{DOCUMENT_TITLE}} {{DOCUMENT_NUMBER}}</title>
     <style>
       * {
         box-sizing: border-box;
@@ -157,7 +157,7 @@
   <body>
     <main class="sheet">
       <section class="ticket">
-        <p class="title center">Boleta Electronica</p>
+        <p class="title center">{{DOCUMENT_TITLE}}</p>
         <p class="doc-number center">{{DOCUMENT_NUMBER}}</p>
 
         <p class="meta-line">
@@ -166,9 +166,11 @@
         </p>
         <p class="line">AULA: {{CLASSROOM_LABEL}}</p>
         <p class="line">EMITIDO POR: {{ISSUED_BY}}</p>
-        <p class="line">Senores: {{CUSTOMER_NAME}}</p>
+        <p class="line">Cliente: {{CUSTOMER_NAME}}</p>
+        <p class="line">{{CUSTOMER_DOCUMENT_LABEL}}: {{CUSTOMER_DOCUMENT}}</p>
+        {{CUSTOMER_ADDRESS_ROW_F1}}
         <p class="line">Alumno: {{STUDENT_NAME}}</p>
-        <p class="line">DNI: {{STUDENT_DOCUMENT}}</p>
+        <p class="line">Documento del alumno: {{STUDENT_DOCUMENT}}</p>
 
         <table>
           <thead>
@@ -197,7 +199,7 @@
 
         <div class="words">SON: {{AMOUNT_WORDS}}</div>
         <div class="footer">
-          <div>Representacion impresa del documento de venta electronica</div>
+          <div>{{DOCUMENT_NOTICE}}</div>
           <div>Este documento puede ser validado en {{VALIDATION_URL}}</div>
         </div>
       </section>

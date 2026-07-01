@@ -683,7 +683,7 @@ CREATE TABLE IF NOT EXISTS payments (
   amount_received NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (amount_received >= 0),
   overpayment_amount NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (overpayment_amount >= 0),
   payment_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  method VARCHAR(30) NOT NULL CHECK (method IN ('YAPE', 'TRANSFERENCIA', 'QR', 'TARJETA', 'CANJE', 'EFECTIVO', 'OTRO')),
+  method VARCHAR(30) NOT NULL CHECK (method IN ('YAPE', 'PLIN', 'TRANSFERENCIA', 'QR', 'TARJETA', 'CANJE', 'EFECTIVO', 'OTRO')),
   reference_code VARCHAR(120),
   status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED' CHECK (status IN ('PENDING', 'COMPLETED', 'REJECTED')),
   processed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
@@ -693,6 +693,11 @@ CREATE TABLE IF NOT EXISTS payments (
   no_evidence BOOLEAN NOT NULL DEFAULT FALSE,
   receipt_token TEXT NOT NULL,
   receipt_token_hash VARCHAR(64) NOT NULL UNIQUE,
+  receipt_document_type VARCHAR(30) NOT NULL DEFAULT 'BOLETA'
+    CHECK (receipt_document_type IN ('BOLETA', 'FACTURA', 'RECIBO_INTERNO')),
+  billing_name VARCHAR(180),
+  billing_document VARCHAR(20),
+  billing_address VARCHAR(240),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

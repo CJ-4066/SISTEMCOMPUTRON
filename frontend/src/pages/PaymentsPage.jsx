@@ -14,12 +14,19 @@ const PAYMENT_STATUS_LABELS = {
 
 const PAYMENT_METHOD_LABELS = {
   YAPE: 'Yape',
+  PLIN: 'Plin',
   TRANSFERENCIA: 'Transferencia',
   QR: 'QR',
   TARJETA: 'Tarjeta',
   CANJE: 'Canje',
   EFECTIVO: 'Efectivo',
   OTRO: 'Otro',
+};
+
+const RECEIPT_DOCUMENT_TYPE_LABELS = {
+  BOLETA: 'Boleta',
+  FACTURA: 'Factura',
+  RECIBO_INTERNO: 'Recibo interno',
 };
 
 const ALL_PENDING_INSTALLMENTS = 'ALL';
@@ -34,6 +41,10 @@ const paymentDefaults = {
   reference_code: '',
   notes: '',
   no_evidence: false,
+  receipt_document_type: 'BOLETA',
+  billing_name: '',
+  billing_document: '',
+  billing_address: '',
 };
 
 const toPaymentStatusLabel = (status) => {
@@ -44,6 +55,11 @@ const toPaymentStatusLabel = (status) => {
 const toPaymentMethodLabel = (method) => {
   const key = String(method || '').toUpperCase();
   return PAYMENT_METHOD_LABELS[key] || method || '-';
+};
+
+const toReceiptDocumentTypeLabel = (documentType) => {
+  const key = String(documentType || '').toUpperCase();
+  return RECEIPT_DOCUMENT_TYPE_LABELS[key] || documentType || 'Comprobante';
 };
 
 const round2 = (value) => Number((Number(value) || 0).toFixed(2));
@@ -89,7 +105,7 @@ const openReceiptWindow = (title) => {
     </style>
   </head>
   <body>
-    <h2>Generando boleta...</h2>
+    <h2>Generando comprobante...</h2>
     <p class="hint">Espera un momento.</p>
   </body>
 </html>`,
@@ -494,6 +510,7 @@ function StaffPaymentsPage() {
         monto_recibido: round2(item.amount_received).toFixed(2),
         saldo_favor: round2(item.overpayment_amount).toFixed(2),
         metodo: toPaymentMethodLabel(item.method),
+        tipo_comprobante: toReceiptDocumentTypeLabel(item.receipt_document_type),
         estado: toPaymentStatusLabel(item.status),
         numero_operacion: item.reference_code || '',
         evidencia: item.no_evidence ? 'Sin evidencia (marcado)' : item.evidence_name || '',
@@ -511,6 +528,7 @@ function StaffPaymentsPage() {
           { key: 'monto_recibido', label: 'Monto recibido' },
           { key: 'saldo_favor', label: 'Saldo a favor' },
           { key: 'metodo', label: 'Método' },
+          { key: 'tipo_comprobante', label: 'Tipo de comprobante' },
           { key: 'estado', label: 'Estado' },
           { key: 'numero_operacion', label: 'Número de operación' },
           { key: 'evidencia', label: 'Evidencia' },
@@ -530,10 +548,10 @@ function StaffPaymentsPage() {
     async (paymentId, { silent = false, format = receiptFormat, autoPrint = false } = {}) => {
       if (!paymentId) return;
 
-      const receiptWindow = openReceiptWindow('Boleta de pago');
+      const receiptWindow = openReceiptWindow('Comprobante de pago');
       if (!receiptWindow) {
         if (!silent) {
-          setError('El navegador bloqueó la apertura de la boleta. Habilita ventanas emergentes e intenta de nuevo.');
+          setError('El navegador bloqueó la apertura del comprobante. Habilita ventanas emergentes e intenta de nuevo.');
         }
         return;
       }
@@ -557,7 +575,7 @@ function StaffPaymentsPage() {
           receiptWindow.close();
         }
         if (!silent) {
-          setError(getApiErrorMessage(requestError, 'No se pudo emitir la boleta del pago.'));
+          setError(getApiErrorMessage(requestError, 'No se pudo emitir el comprobante del pago.'));
         }
       }
     },
@@ -566,8 +584,23 @@ function StaffPaymentsPage() {
 
   const previewPaymentReceipt = async ({ autoPrint = false } = {}) => {
     if (!form.student_id) {
-      setError('Selecciona un alumno para la vista previa de boleta.');
+      setError('Selecciona un alumno para la vista previa del comprobante.');
       return;
+    }
+
+    if (form.receipt_document_type === 'FACTURA') {
+      if (!/^\d{11}$/.test(form.billing_document.trim())) {
+        setError('El RUC debe tener exactamente 11 dígitos.');
+        return;
+      }
+      if (form.billing_name.trim().length < 2) {
+        setError('Ingresa la razón social para la factura.');
+        return;
+      }
+      if (form.billing_address.trim().length < 3) {
+        setError('Ingresa la dirección fiscal para la factura.');
+        return;
+      }
     }
 
     const pendingByInstallment = new Map(
@@ -590,14 +623,16 @@ function StaffPaymentsPage() {
 
     const previewAmount = round2(pendingTotals.amountReceived || 0);
     if (previewDetails.length === 0 || previewAmount <= 0) {
-      setError('Ingresa un monto válido para generar la vista previa de boleta.');
+      setError('Ingresa un monto válido para generar la vista previa del comprobante.');
       return;
     }
 
     const firstEnrollmentId =
       allocationByEnrollment[0]?.enrollment_id || selectedPendingItems[0]?.enrollment_id || null;
 
-    const previewWindow = openReceiptWindow('Vista previa de boleta');
+    const previewWindow = openReceiptWindow(
+      `Vista previa: ${toReceiptDocumentTypeLabel(form.receipt_document_type)}`,
+    );
     if (!previewWindow) {
       setError('El navegador bloqueó la vista previa. Habilita ventanas emergentes e intenta de nuevo.');
       return;
@@ -609,6 +644,10 @@ function StaffPaymentsPage() {
         '/payments/receipt-preview',
         {
           format: receiptFormat,
+          receipt_document_type: form.receipt_document_type,
+          billing_name: form.billing_name.trim() || null,
+          billing_document: form.billing_document.trim() || null,
+          billing_address: form.billing_address.trim() || null,
           student_id: Number(form.student_id),
           enrollment_id: firstEnrollmentId ? Number(firstEnrollmentId) : undefined,
           amount_received: previewAmount,
@@ -630,11 +669,11 @@ function StaffPaymentsPage() {
         previewWindow.close();
       }
       if (requestError.response?.status === 404) {
-        setError('La vista previa de boleta no está disponible en el backend actual. Reinicia el backend.');
+        setError('La vista previa del comprobante no está disponible en el backend actual. Reinicia el backend.');
         return;
       }
 
-      setError(getApiErrorMessage(requestError, 'No se pudo generar la vista previa de la boleta.'));
+      setError(getApiErrorMessage(requestError, 'No se pudo generar la vista previa del comprobante.'));
     }
   };
 
@@ -662,8 +701,20 @@ function StaffPaymentsPage() {
         throw new Error('Ingresa un monto válido para el pago.');
       }
 
-      if (!form.reference_code.trim()) {
+      if (form.method !== 'EFECTIVO' && !form.reference_code.trim()) {
         throw new Error('Ingresa el número de operación.');
+      }
+
+      if (form.receipt_document_type === 'FACTURA') {
+        if (!/^\d{11}$/.test(form.billing_document.trim())) {
+          throw new Error('El RUC debe tener exactamente 11 dígitos.');
+        }
+        if (form.billing_name.trim().length < 2) {
+          throw new Error('Ingresa la razón social para la factura.');
+        }
+        if (form.billing_address.trim().length < 3) {
+          throw new Error('Ingresa la dirección fiscal para la factura.');
+        }
       }
 
       if (allocationByEnrollment.length === 0) {
@@ -708,9 +759,13 @@ function StaffPaymentsPage() {
           enrollment_id: Number(group.enrollment_id),
           method: form.method,
           status: 'COMPLETED',
-          reference_code: form.reference_code.trim(),
+          reference_code: form.reference_code.trim() || null,
           notes: mergedNotes,
           amount_received: groupReceived,
+          receipt_document_type: form.receipt_document_type,
+          billing_name: form.billing_name.trim() || null,
+          billing_document: form.billing_document.trim() || null,
+          billing_address: form.billing_address.trim() || null,
           evidence_name: evidenceName,
           evidence_url: evidenceUrl,
           no_evidence: needsEvidence ? Boolean(form.no_evidence) : false,
@@ -831,6 +886,12 @@ function StaffPaymentsPage() {
               <span className="text-gray-900 font-semibold truncate text-right">{toPaymentMethodLabel(payment.method)}</span>
             </div>
             <div className="flex justify-between items-center text-xs gap-2">
+              <span className="text-gray-500 font-medium whitespace-nowrap">Comprobante</span>
+              <span className="text-gray-900 font-semibold truncate text-right">
+                {toReceiptDocumentTypeLabel(payment.receipt_document_type)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-xs gap-2">
               <span className="text-gray-500 font-medium whitespace-nowrap">Recibido</span>
               <span className="text-emerald-700 font-bold text-right">S/ {round2(payment.amount_received).toFixed(2)}</span>
             </div>
@@ -868,7 +929,7 @@ function StaffPaymentsPage() {
               className="flex-1 rounded-lg bg-primary-50 py-1.5 text-[11px] font-bold text-primary-700 hover:bg-primary-100 transition-colors disabled:opacity-50"
               onClick={() => openPaymentReceipt(payment.id)}
             >
-              BOLETA
+              {toReceiptDocumentTypeLabel(payment.receipt_document_type).toUpperCase()}
             </button>
             {canManagePayments ? (
               <button
@@ -994,23 +1055,25 @@ function StaffPaymentsPage() {
               className="app-input"
               value={form.method}
               onChange={(event) => setForm((prev) => ({ ...prev, method: event.target.value }))}
+              aria-label="Método de pago"
               required
             >
+              <option value="EFECTIVO">Efectivo</option>
               <option value="YAPE">Yape</option>
+              <option value="PLIN">Plin</option>
               <option value="TRANSFERENCIA">Transferencia</option>
               <option value="QR">QR</option>
               <option value="TARJETA">Tarjeta</option>
               <option value="CANJE">Canje</option>
-              <option value="EFECTIVO">Efectivo</option>
               <option value="OTRO">Otro</option>
             </select>
 
             <input
               className="app-input lg:col-span-2"
-              placeholder="Número de operación"
+              placeholder={form.method === 'EFECTIVO' ? 'Número de operación (opcional)' : 'Número de operación'}
               value={form.reference_code}
               onChange={(event) => setForm((prev) => ({ ...prev, reference_code: event.target.value }))}
-              required
+              required={form.method !== 'EFECTIVO'}
             />
 
             <input
@@ -1022,13 +1085,87 @@ function StaffPaymentsPage() {
 
             <select
               className="app-input"
+              value={form.receipt_document_type}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  receipt_document_type: event.target.value,
+                }))
+              }
+              aria-label="Tipo de comprobante"
+            >
+              <option value="BOLETA">Boleta</option>
+              <option value="FACTURA">Factura</option>
+              <option value="RECIBO_INTERNO">Recibo interno</option>
+            </select>
+
+            <select
+              className="app-input"
               value={receiptFormat}
               onChange={(event) => setReceiptFormat(event.target.value)}
+              aria-label="Diseño del comprobante"
             >
-              <option value="F1">Boleta Ticketera</option>
-              <option value="F2">Boleta A4</option>
+              <option value="F1">Diseño ticket</option>
+              <option value="F2">Diseño A4</option>
             </select>
           </div>
+
+          {form.receipt_document_type === 'FACTURA' ? (
+            <fieldset className="rounded-2xl border border-primary-200 bg-primary-50/40 p-4">
+              <legend className="px-2 text-sm font-semibold text-primary-900">Datos de facturación</legend>
+              <div className="grid gap-3 lg:grid-cols-4">
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-primary-700">RUC</span>
+                  <input
+                    className="app-input"
+                    inputMode="numeric"
+                    maxLength={11}
+                    placeholder="11 dígitos"
+                    value={form.billing_document}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        billing_document: event.target.value.replace(/\D/g, '').slice(0, 11),
+                      }))
+                    }
+                    required
+                  />
+                </label>
+
+                <label className="space-y-1 lg:col-span-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-primary-700">
+                    Razón social
+                  </span>
+                  <input
+                    className="app-input"
+                    maxLength={180}
+                    placeholder="Nombre o razón social"
+                    value={form.billing_name}
+                    onChange={(event) => setForm((prev) => ({ ...prev, billing_name: event.target.value }))}
+                    required
+                  />
+                </label>
+
+                <label className="space-y-1 lg:col-span-4">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-primary-700">
+                    Dirección fiscal
+                  </span>
+                  <input
+                    className="app-input"
+                    maxLength={240}
+                    placeholder="Dirección fiscal completa"
+                    value={form.billing_address}
+                    onChange={(event) => setForm((prev) => ({ ...prev, billing_address: event.target.value }))}
+                    required
+                  />
+                </label>
+              </div>
+              <p className="mt-3 text-xs text-primary-700">
+                Este formato se genera dentro del sistema. La validez tributaria requiere emisión electrónica
+                mediante SUNAT.
+              </p>
+            </fieldset>
+          ) : null}
 
           {form.method !== 'EFECTIVO' ? (
             <div className="grid gap-3 lg:grid-cols-4">
@@ -1130,7 +1267,7 @@ function StaffPaymentsPage() {
               disabled={loadingPendingSummary || loadingEnrollments}
               className="rounded-xl border border-primary-300 px-4 py-2 text-sm font-semibold text-primary-800 hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Vista previa boleta
+              Vista previa comprobante
             </button>
 
             <button

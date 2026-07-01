@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Boleta Electronica {{DOCUMENT_NUMBER}}</title>
+    <title>{{DOCUMENT_TITLE}} {{DOCUMENT_NUMBER}}</title>
     <style>
       * {
         box-sizing: border-box;
@@ -185,22 +185,26 @@
         </div>
         <div class="doc-box">
           <div><strong>R.U.C. {{RUC_NUMBER}}</strong></div>
-          <div class="doc-title">Boleta Electronica</div>
+          <div class="doc-title">{{DOCUMENT_TITLE}}</div>
           <div><strong>N° {{DOCUMENT_NUMBER}}</strong></div>
         </div>
       </header>
 
       <div class="info">
         <p class="info-line">
-          <span><strong>Senores(as):</strong> {{CUSTOMER_NAME}}</span>
-          <span><strong>D.N.I:</strong> {{STUDENT_DOCUMENT}}</span>
+          <span><strong>Cliente:</strong> {{CUSTOMER_NAME}}</span>
+          <span><strong>{{CUSTOMER_DOCUMENT_LABEL}}:</strong> {{CUSTOMER_DOCUMENT}}</span>
         </p>
+        {{CUSTOMER_ADDRESS_ROW_F2}}
         <p class="info-line">
           <span><strong>Alumno:</strong> {{STUDENT_NAME}}</span>
-          <span><strong>Fecha:</strong> {{ISSUE_DATE}} {{ISSUE_TIME}}</span>
+          <span><strong>Documento:</strong> {{STUDENT_DOCUMENT}}</span>
         </p>
         <p class="info-line">
           <span><strong>Grado y Seccion:</strong> {{CLASSROOM_LABEL}}</span>
+          <span><strong>Fecha:</strong> {{ISSUE_DATE}} {{ISSUE_TIME}}</span>
+        </p>
+        <p class="info-line">
           <span><strong>Emitido por:</strong> {{ISSUED_BY}}</span>
         </p>
       </div>
@@ -240,6 +244,7 @@
 
       <div class="status">{{STATUS_LABEL}}</div>
       <div class="foot">{{AMOUNT_WORDS}}</div>
+      <div class="foot">{{DOCUMENT_NOTICE}}</div>
     </section>
   </body>
 </html>

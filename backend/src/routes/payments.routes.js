@@ -12,6 +12,7 @@ const { authenticate, authorizePermission } = require('../middlewares/auth');
 const { parseCampusScopeId } = require('../utils/campusScope');
 const {
   buildReceiptHtml,
+  normalizeReceiptDocumentType,
   normalizeReceiptFormat,
 } = require('../services/receiptTemplate.service');
 const { buildQrDataUrl } = require('../services/qrCode.service');
@@ -25,7 +26,13 @@ const {
 const router = express.Router();
 
 const PAYMENT_STATUS = ['PENDING', 'COMPLETED', 'REJECTED'];
-const PAYMENT_METHODS = ['YAPE', 'TRANSFERENCIA', 'QR', 'TARJETA', 'CANJE', 'EFECTIVO', 'OTRO'];
+const PAYMENT_METHODS = ['YAPE', 'PLIN', 'TRANSFERENCIA', 'QR', 'TARJETA', 'CANJE', 'EFECTIVO', 'OTRO'];
+const RECEIPT_DOCUMENT_TYPES = ['BOLETA', 'FACTURA', 'RECIBO_INTERNO'];
+const RECEIPT_DOCUMENT_PREFIXES = {
+  BOLETA: 'BP',
+  FACTURA: 'FP',
+  RECIBO_INTERNO: 'RI',
+};
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida (YYYY-MM-DD)');
 const PAYMENT_EVIDENCE_MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const booleanQuery = z.preprocess((value) => {
@@ -47,6 +54,15 @@ const paymentEvidenceMimeTypes = new Set([
 ]);
 
 fs.mkdirSync(paymentEvidenceDir, { recursive: true });
+
+const nullableTrimmedText = ({ min = 1, max }) =>
+  z.preprocess(
+    (value) => {
+      if (value === undefined || value === null) return value;
+      return String(value).trim() || null;
+    },
+    z.string().trim().min(min).max(max).nullable().optional(),
+  );
 
 const paymentEvidenceUpload = multer({
   storage: multer.diskStorage({
@@ -92,9 +108,13 @@ const createPaymentSchema = z.object({
       enrollment_id: z.number().int().positive(),
       method: z.enum(PAYMENT_METHODS),
       status: z.enum(PAYMENT_STATUS).optional().default('COMPLETED'),
-      reference_code: z.string().trim().min(1, 'El número de operación es obligatorio.').max(120),
+      reference_code: nullableTrimmedText({ max: 120 }),
       notes: z.string().max(400).nullable().optional(),
       amount_received: z.number().positive().optional(),
+      receipt_document_type: z.enum(RECEIPT_DOCUMENT_TYPES).optional().default('BOLETA'),
+      billing_name: nullableTrimmedText({ max: 180 }),
+      billing_document: nullableTrimmedText({ max: 20 }),
+      billing_address: nullableTrimmedText({ max: 240 }),
       evidence_name: z.string().trim().max(180).nullable().optional(),
       evidence_url: attachmentUrlSchema.nullable().optional(),
       no_evidence: z.boolean().optional().default(false),
@@ -109,12 +129,44 @@ const createPaymentSchema = z.object({
         .default([]),
     })
     .superRefine((payload, ctx) => {
+      if (payload.method !== 'EFECTIVO' && !payload.reference_code) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['reference_code'],
+          message: 'El número de operación es obligatorio para pagos no efectivo.',
+        });
+      }
+
       if (payload.method !== 'EFECTIVO' && !payload.no_evidence && !payload.evidence_url) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['evidence_url'],
           message: 'Debe adjuntar evidencia para pagos no efectivo o marcar "No se tiene evidencias".',
         });
+      }
+
+      if (payload.receipt_document_type === 'FACTURA') {
+        if (!/^\d{11}$/.test(payload.billing_document || '')) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['billing_document'],
+            message: 'El RUC debe tener exactamente 11 dígitos.',
+          });
+        }
+        if (!payload.billing_name || payload.billing_name.length < 2) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['billing_name'],
+            message: 'La razón social es obligatoria para la factura.',
+          });
+        }
+        if (!payload.billing_address || payload.billing_address.length < 3) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['billing_address'],
+            message: 'La dirección fiscal es obligatoria para la factura.',
+          });
+        }
       }
     }),
   params: z.object({}).optional(),
@@ -177,7 +229,7 @@ const paymentReceiptVerificationSchema = z.object({
       .trim()
       .min(16)
       .max(128)
-      .regex(RECEIPT_TOKEN_REGEX, 'Token de boleta inválido.'),
+      .regex(RECEIPT_TOKEN_REGEX, 'Token de comprobante inválido.'),
   }),
   query: z
     .object({
@@ -188,22 +240,52 @@ const paymentReceiptVerificationSchema = z.object({
 });
 
 const paymentReceiptPreviewSchema = z.object({
-  body: z.object({
-    format: z.string().optional(),
-    student_id: z.number().int().positive().optional(),
-    enrollment_id: z.number().int().positive().optional(),
-    amount_received: z.number().nonnegative().optional(),
-    issue_date: z.string().optional(),
-    details: z
-      .array(
-        z.object({
-          description: z.string().trim().min(1).max(180),
-          amount: z.number().nonnegative(),
-          quantity: z.number().int().positive().optional(),
-        }),
-      )
-      .default([]),
-  }),
+  body: z
+    .object({
+      format: z.string().optional(),
+      receipt_document_type: z.enum(RECEIPT_DOCUMENT_TYPES).optional().default('BOLETA'),
+      billing_name: nullableTrimmedText({ max: 180 }),
+      billing_document: nullableTrimmedText({ max: 20 }),
+      billing_address: nullableTrimmedText({ max: 240 }),
+      student_id: z.number().int().positive().optional(),
+      enrollment_id: z.number().int().positive().optional(),
+      amount_received: z.number().nonnegative().optional(),
+      issue_date: z.string().optional(),
+      details: z
+        .array(
+          z.object({
+            description: z.string().trim().min(1).max(180),
+            amount: z.number().nonnegative(),
+            quantity: z.number().int().positive().optional(),
+          }),
+        )
+        .default([]),
+    })
+    .superRefine((payload, ctx) => {
+      if (payload.receipt_document_type !== 'FACTURA') return;
+
+      if (!/^\d{11}$/.test(payload.billing_document || '')) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['billing_document'],
+          message: 'El RUC debe tener exactamente 11 dígitos.',
+        });
+      }
+      if (!payload.billing_name || payload.billing_name.length < 2) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['billing_name'],
+          message: 'La razón social es obligatoria para la factura.',
+        });
+      }
+      if (!payload.billing_address || payload.billing_address.length < 3) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['billing_address'],
+          message: 'La dirección fiscal es obligatoria para la factura.',
+        });
+      }
+    }),
   params: z.object({}).optional(),
   query: z.object({}).optional(),
 });
@@ -325,6 +407,10 @@ const getPaymentReceiptContextBySqlFilter = async ({ whereSql, whereParams }) =>
        p.notes,
        p.created_at,
        p.receipt_token,
+       p.receipt_document_type,
+       p.billing_name,
+       p.billing_document,
+       p.billing_address,
        CONCAT(s.first_name, ' ', s.last_name) AS student_name,
        s.document_number AS student_document,
        c.name AS course_name,
@@ -400,6 +486,9 @@ const getReceiptSnapshotByToken = async ({ receiptToken }) => {
 };
 
 const buildPaymentReceiptHtml = async ({ req, payment, detailRows, format }) => {
+  const documentType = normalizeReceiptDocumentType(payment.receipt_document_type);
+  const documentPrefix = RECEIPT_DOCUMENT_PREFIXES[documentType];
+  const isInvoice = documentType === 'FACTURA';
   const rawReceiptToken = decryptReceiptToken(payment.receipt_token);
   const verificationUrl = buildReceiptVerificationUrl(req, rawReceiptToken, format);
   let qrImageDataUrl = '';
@@ -411,11 +500,14 @@ const buildPaymentReceiptHtml = async ({ req, payment, detailRows, format }) => 
 
   return buildReceiptHtml({
     format: normalizeReceiptFormat(format),
-    documentNumber: `BP-${String(payment.id).padStart(7, '0')}`,
+    documentType,
+    documentNumber: `${documentPrefix}-${String(payment.id).padStart(7, '0')}`,
     issueDate: payment.payment_date || payment.created_at,
     issuedBy: payment.processed_by_name,
     classroomLabel: [payment.course_name, payment.period_name, payment.campus_name].filter(Boolean).join(' - '),
-    customerName: payment.student_name,
+    customerName: isInvoice ? payment.billing_name : payment.student_name,
+    customerDocument: isInvoice ? payment.billing_document : payment.student_document,
+    customerAddress: isInvoice ? payment.billing_address : null,
     studentName: payment.student_name,
     studentDocument: payment.student_document,
     details: detailRows,
@@ -521,7 +613,7 @@ router.get(
         detailRows,
         format: receiptFormat,
       });
-      const fileName = `boleta_pago_${payment.id}.html`;
+      const fileName = `comprobante_pago_${payment.id}.html`;
 
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store');
@@ -531,10 +623,10 @@ router.get(
 
     const snapshot = await getReceiptSnapshotByToken({ receiptToken });
     if (!snapshot) {
-      throw new ApiError(404, 'Boleta no encontrada.');
+      throw new ApiError(404, 'Comprobante no encontrado.');
     }
 
-    const fileName = `boleta_preview_${snapshot.id}.html`;
+    const fileName = `comprobante_preview_${snapshot.id}.html`;
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
@@ -627,6 +719,7 @@ router.get(
         p.evidence_name,
         p.evidence_url,
         p.no_evidence,
+        p.receipt_document_type,
         p.created_at,
         CONCAT(u.first_name, ' ', u.last_name) AS processed_by_name
       FROM payments p
@@ -732,6 +825,10 @@ router.post(
       reference_code,
       notes = null,
       amount_received = undefined,
+      receipt_document_type = 'BOLETA',
+      billing_name = null,
+      billing_document = null,
+      billing_address = null,
       evidence_name = null,
       evidence_url = null,
       no_evidence = false,
@@ -790,7 +887,13 @@ router.post(
 
       const normalizedEvidenceName = evidence_name?.trim() || null;
       const normalizedEvidenceUrl = evidence_url?.trim() || null;
-      const normalizedReferenceCode = reference_code.trim();
+      const normalizedReferenceCode =
+        reference_code?.trim() || (method === 'EFECTIVO' ? 'EFECTIVO' : null);
+      const normalizedDocumentType = normalizeReceiptDocumentType(receipt_document_type);
+      const isInvoice = normalizedDocumentType === 'FACTURA';
+      const normalizedBillingName = isInvoice ? billing_name?.trim() || null : null;
+      const normalizedBillingDocument = isInvoice ? billing_document?.trim() || null : null;
+      const normalizedBillingAddress = isInvoice ? billing_address?.trim() || null : null;
       const receivedAmount = Number(amount_received ?? totalAmount);
       const roundedReceivedAmount = Number(receivedAmount.toFixed(2));
       const roundedTotalAmount = Number(totalAmount.toFixed(2));
@@ -827,9 +930,16 @@ router.post(
           no_evidence,
           receipt_token,
           receipt_token_hash,
+          receipt_document_type,
+          billing_name,
+          billing_document,
+          billing_address,
           processed_by
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+           $11, $12, $13, $14, $15, $16, $17, $18, $19
+         )
          RETURNING
            id,
            student_id,
@@ -841,6 +951,10 @@ router.post(
            status,
            payment_date,
            receipt_token,
+           receipt_document_type,
+           billing_name,
+           billing_document,
+           billing_address,
            evidence_name,
            evidence_url,
            no_evidence,
@@ -860,6 +974,10 @@ router.post(
           no_evidence,
           encryptedReceiptToken,
           receiptTokenHash,
+          normalizedDocumentType,
+          normalizedBillingName,
+          normalizedBillingDocument,
+          normalizedBillingAddress,
           req.user.id,
         ],
       );
@@ -959,6 +1077,10 @@ router.post(
   asyncHandler(async (req, res) => {
     const {
       format,
+      receipt_document_type: receiptDocumentType = 'BOLETA',
+      billing_name: billingName = null,
+      billing_document: billingDocument = null,
+      billing_address: billingAddress = null,
       student_id: studentId = null,
       enrollment_id: enrollmentId = null,
       amount_received: amountReceived = null,
@@ -1020,6 +1142,9 @@ router.post(
 
     const totalFromDetails = normalizedDetails.reduce((sum, item) => sum + Number(item.total || 0), 0);
     const totalAmount = Number(amountReceived ?? totalFromDetails ?? 0);
+    const normalizedDocumentType = normalizeReceiptDocumentType(receiptDocumentType);
+    const documentPrefix = RECEIPT_DOCUMENT_PREFIXES[normalizedDocumentType];
+    const isInvoice = normalizedDocumentType === 'FACTURA';
     const previewRawToken = generateReceiptToken();
     const previewTokenHash = hashReceiptToken(previewRawToken);
     const previewEncryptedToken = encryptReceiptToken(previewRawToken);
@@ -1033,10 +1158,13 @@ router.post(
 
     const html = buildReceiptHtml({
       format: normalizeReceiptFormat(format),
-      documentNumber: 'PREVIEW-0000000',
+      documentType: normalizedDocumentType,
+      documentNumber: `${documentPrefix}-PREVIEW`,
       issueDate: issueDate || new Date().toISOString(),
       classroomLabel,
-      customerName: studentName,
+      customerName: isInvoice ? billingName : studentName,
+      customerDocument: isInvoice ? billingDocument : studentDocument,
+      customerAddress: isInvoice ? billingAddress : null,
       studentName,
       studentDocument,
       details:
@@ -1092,7 +1220,7 @@ router.get(
       format: receiptFormat,
     });
 
-    const fileName = `boleta_pago_${payment.id}.html`;
+    const fileName = `comprobante_pago_${payment.id}.html`;
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');

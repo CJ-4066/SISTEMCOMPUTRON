@@ -791,6 +791,13 @@ const ensurePaymentsEvidenceColumns = async () => {
   await query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS no_evidence BOOLEAN`);
   await query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS receipt_token TEXT`);
   await query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS receipt_token_hash VARCHAR(64)`);
+  await query(
+    `ALTER TABLE payments
+     ADD COLUMN IF NOT EXISTS receipt_document_type VARCHAR(30) NOT NULL DEFAULT 'BOLETA'`,
+  );
+  await query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS billing_name VARCHAR(180)`);
+  await query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS billing_document VARCHAR(20)`);
+  await query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS billing_address VARCHAR(240)`);
   await query(`ALTER TABLE payments ALTER COLUMN receipt_token TYPE TEXT`);
 
   await query(`UPDATE payments SET amount_received = total_amount WHERE amount_received IS NULL`);
@@ -908,7 +915,27 @@ const ensurePaymentsEvidenceColumns = async () => {
 
       ALTER TABLE payments
       ADD CONSTRAINT payments_method_check
-      CHECK (method IN ('YAPE', 'TRANSFERENCIA', 'QR', 'TARJETA', 'CANJE', 'EFECTIVO', 'OTRO'));
+      CHECK (method IN ('YAPE', 'PLIN', 'TRANSFERENCIA', 'QR', 'TARJETA', 'CANJE', 'EFECTIVO', 'OTRO'));
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END
+    $$;
+  `);
+
+  await query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'payments_receipt_document_type_check'
+      ) THEN
+        ALTER TABLE payments DROP CONSTRAINT payments_receipt_document_type_check;
+      END IF;
+
+      ALTER TABLE payments
+      ADD CONSTRAINT payments_receipt_document_type_check
+      CHECK (receipt_document_type IN ('BOLETA', 'FACTURA', 'RECIBO_INTERNO'));
     EXCEPTION
       WHEN duplicate_object THEN NULL;
     END
