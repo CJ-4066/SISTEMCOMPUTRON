@@ -146,7 +146,7 @@ const resolvePreferredCertificateEnrollment = (student, detailItem) => {
   return enrollments.find((item) => item?.certificate_eligible) || detailItem?.preferred_certificate_enrollment || null;
 };
 
-const getCertificateBadge = ({ eligible = false, allowAdminOverride = false } = {}) => {
+const getCertificateBadge = ({ eligible = false, allowExceptionalIssue = false } = {}) => {
   if (eligible) {
     return {
       label: 'Apto para certificado',
@@ -154,9 +154,9 @@ const getCertificateBadge = ({ eligible = false, allowAdminOverride = false } = 
     };
   }
 
-  if (allowAdminOverride) {
+  if (allowExceptionalIssue) {
     return {
-      label: 'Solo ADMIN',
+      label: 'Emisión autorizada',
       className: 'border border-amber-200 bg-amber-50 text-amber-700',
     };
   }
@@ -169,7 +169,9 @@ const getCertificateBadge = ({ eligible = false, allowAdminOverride = false } = 
 
 export default function CertificateGeneratorLauncher() {
   const { user, hasPermission } = useAuth();
-  const isAdminProfile = (user?.roles || []).includes('ADMIN');
+  const userRoles = user?.roles || [];
+  const canIssueExceptionalCertificate =
+    userRoles.includes('ADMIN') || userRoles.includes('SECRETARIADO');
   const canSearchStudents = hasPermission(PERMISSIONS.STUDENTS_VIEW);
 
   const [draft, setDraft] = useState(createCertificateDraftDefaults);
@@ -188,7 +190,7 @@ export default function CertificateGeneratorLauncher() {
   const isDraftEligible = draft.certificate_eligible === true;
   const generatorBlockReason = useMemo(() => {
     if (processingPhoto || loadingStudentDetail) return '';
-    if (isAdminProfile) return '';
+    if (canIssueExceptionalCertificate) return '';
     if (!hasBoundStudent) return 'Selecciona un alumno apto para habilitar el generador.';
     if (!isDraftEligible) {
       return draft.certificate_eligibility_reason || 'El alumno seleccionado todavía no está apto para certificado.';
@@ -197,7 +199,7 @@ export default function CertificateGeneratorLauncher() {
   }, [
     draft.certificate_eligibility_reason,
     hasBoundStudent,
-    isAdminProfile,
+    canIssueExceptionalCertificate,
     isDraftEligible,
     loadingStudentDetail,
     processingPhoto,
@@ -205,7 +207,8 @@ export default function CertificateGeneratorLauncher() {
 
   const selectedStudentBadge = getCertificateBadge({
     eligible: isDraftEligible,
-    allowAdminOverride: hasBoundStudent && !isDraftEligible && isAdminProfile,
+    allowExceptionalIssue:
+      hasBoundStudent && !isDraftEligible && canIssueExceptionalCertificate,
   });
 
   const updateDraftField = (field, value) => {
@@ -242,7 +245,7 @@ export default function CertificateGeneratorLauncher() {
             q: search || undefined,
             page: 1,
             page_size: STUDENT_LOOKUP_LIMIT,
-            certificate_ready_only: isAdminProfile ? !showIneligibleStudents : true,
+            certificate_ready_only: canIssueExceptionalCertificate ? !showIneligibleStudents : true,
           },
         });
         setStudentResults(response.data?.items || []);
@@ -253,7 +256,7 @@ export default function CertificateGeneratorLauncher() {
         setLoadingStudents(false);
       }
     },
-    [canSearchStudents, isAdminProfile, showIneligibleStudents],
+    [canIssueExceptionalCertificate, canSearchStudents, showIneligibleStudents],
   );
 
   useEffect(() => {
@@ -321,14 +324,14 @@ export default function CertificateGeneratorLauncher() {
         );
       } else if (preferredEnrollment) {
         setLookupMessage(
-          isAdminProfile
-            ? `Se cargaron los datos de ${studentName}. ${eligibilityReason} Como ADMIN puedes emitir el certificado de forma excepcional.`
+          canIssueExceptionalCertificate
+            ? `Se cargaron los datos de ${studentName}. ${eligibilityReason} Tu rol permite emitir el certificado de forma excepcional.`
             : `Se cargaron los datos de ${studentName}. ${eligibilityReason}`,
         );
       } else {
         setLookupMessage(
-          isAdminProfile
-            ? `Se cargaron nombre y documento de ${studentName}. No se encontró una matrícula válida para certificar; solo ADMIN puede completar y emitir manualmente.`
+          canIssueExceptionalCertificate
+            ? `Se cargaron nombre y documento de ${studentName}. No se encontró una matrícula válida; tu rol permite completar y emitir manualmente dentro de tu sede.`
             : `Se cargaron nombre y documento de ${studentName}, pero no tiene una matrícula apta para certificar.`,
         );
       }
@@ -395,7 +398,7 @@ export default function CertificateGeneratorLauncher() {
         throw new Error('Completa el nombre del alumno antes de abrir el generador.');
       }
 
-      if (!isAdminProfile) {
+      if (!canIssueExceptionalCertificate) {
         if (!hasBoundStudent) {
           throw new Error('Selecciona un alumno apto antes de generar el certificado.');
         }
@@ -450,7 +453,7 @@ export default function CertificateGeneratorLauncher() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {isAdminProfile ? (
+              {canIssueExceptionalCertificate ? (
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm text-primary-800">
                   <input
                     type="checkbox"
@@ -501,7 +504,8 @@ export default function CertificateGeneratorLauncher() {
                 const isSelected = String(student.id) === String(selectedStudentId);
                 const badge = getCertificateBadge({
                   eligible: student.certificate_eligible === true,
-                  allowAdminOverride: student.certificate_eligible !== true && isAdminProfile,
+                  allowExceptionalIssue:
+                    student.certificate_eligible !== true && canIssueExceptionalCertificate,
                 });
 
                 return (
@@ -548,7 +552,7 @@ export default function CertificateGeneratorLauncher() {
             <p className="text-sm text-primary-700">
               {studentSearch.trim()
                 ? 'No se encontraron alumnos para ese criterio.'
-                : isAdminProfile && showIneligibleStudents
+                : canIssueExceptionalCertificate && showIneligibleStudents
                   ? 'Escribe un nombre o documento para elegir un alumno y completar el certificado, incluso si aún no está apto.'
                   : 'Escribe un nombre o documento para elegir un alumno apto y precargar el certificado.'}
             </p>
@@ -561,7 +565,7 @@ export default function CertificateGeneratorLauncher() {
               className={`rounded-xl border px-4 py-3 ${
                 isDraftEligible
                   ? 'border-emerald-200 bg-emerald-50'
-                  : isAdminProfile
+                  : canIssueExceptionalCertificate
                     ? 'border-amber-200 bg-amber-50'
                     : 'border-red-200 bg-red-50'
               }`}
@@ -570,8 +574,8 @@ export default function CertificateGeneratorLauncher() {
                 <p className="text-sm font-semibold text-primary-900">
                   {isDraftEligible
                     ? 'Alumno apto para certificado'
-                    : isAdminProfile
-                      ? 'Emisión excepcional disponible solo para ADMIN'
+                    : canIssueExceptionalCertificate
+                      ? 'Emisión excepcional autorizada para tu rol'
                       : 'Alumno no apto para certificado'}
                 </p>
                 <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${selectedStudentBadge.className}`}>
@@ -587,8 +591,8 @@ export default function CertificateGeneratorLauncher() {
       ) : (
         <section className="panel-soft">
           <p className="text-sm text-primary-700">
-            {isAdminProfile
-              ? 'Tu usuario no puede consultar alumnos desde este módulo, pero como ADMIN aún puedes completar el certificado manualmente.'
+            {canIssueExceptionalCertificate
+              ? 'Tu rol puede completar el certificado manualmente, pero solo dentro de las sedes autorizadas.'
               : 'Tu usuario no puede consultar alumnos desde este módulo. Sin una matrícula validada no podrás emitir certificados.'}
           </p>
         </section>
@@ -739,8 +743,8 @@ export default function CertificateGeneratorLauncher() {
           <div className="space-y-2">
             <h3 className="text-base font-semibold text-primary-900">Acciones</h3>
             <p className="text-sm text-primary-700">
-              {isAdminProfile
-                ? 'Puedes emitir certificados aptos normalmente y, si el alumno aún no está apto, continuar como excepción administrativa.'
+              {canIssueExceptionalCertificate
+                ? 'Puedes emitir certificados aptos y realizar emisiones excepcionales dentro de tus sedes autorizadas.'
                 : 'Primero selecciona un alumno apto. El generador se habilita solo cuando el curso ya culminó.'}
             </p>
             {generatorBlockReason ? (

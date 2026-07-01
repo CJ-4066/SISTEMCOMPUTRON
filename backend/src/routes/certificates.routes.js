@@ -347,7 +347,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const payload = req.validated.body;
     const campusScopeId = parseCampusScopeId(req);
-    const isAdminProfile = Array.isArray(req.user?.roles) && req.user.roles.includes('ADMIN');
+    const canIssueExceptionalCertificate =
+      Array.isArray(req.user?.roles) &&
+      req.user.roles.some((role) => role === 'ADMIN' || role === 'SECRETARIADO');
     const requestedStudentId = payload.student_id ?? null;
     const requestedEnrollmentId = payload.enrollment_id ?? null;
     const validationEnrollments = await loadCertificateValidationEnrollments({
@@ -365,10 +367,10 @@ router.post(
       );
     }
 
-    if (!requestedStudentId && !requestedEnrollmentId && !isAdminProfile) {
+    if (!requestedStudentId && !requestedEnrollmentId && !canIssueExceptionalCertificate) {
       throw new ApiError(
         403,
-        'Selecciona un alumno apto antes de generar el certificado. Solo un administrador puede emitir certificados sin una matrícula validada.',
+        'Selecciona un alumno apto antes de generar el certificado. Solo ADMIN o SECRETARIADO pueden emitir sin una matrícula validada.',
       );
     }
 
@@ -376,14 +378,14 @@ router.post(
       ? validationEnrollments[0] || null
       : pickPreferredCertificateEnrollment(validationEnrollments, { allowIneligible: true });
 
-    if (selectedEnrollment && !selectedEnrollment.certificate_eligible && !isAdminProfile) {
+    if (selectedEnrollment && !selectedEnrollment.certificate_eligible && !canIssueExceptionalCertificate) {
       throw new ApiError(
         403,
-        `${selectedEnrollment.certificate_eligibility_reason} Solo un administrador puede emitir certificados antes de que el curso esté apto.`,
+        `${selectedEnrollment.certificate_eligibility_reason} Solo ADMIN o SECRETARIADO pueden realizar esta emisión excepcional.`,
       );
     }
 
-    if (!selectedEnrollment && requestedStudentId && !isAdminProfile) {
+    if (!selectedEnrollment && requestedStudentId && !canIssueExceptionalCertificate) {
       throw new ApiError(
         403,
         campusScopeId
