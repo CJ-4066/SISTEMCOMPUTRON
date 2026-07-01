@@ -10,6 +10,7 @@ import { calculateAgeFromBirthDate, formatAgeLabel, normalizeDateOnly } from '..
 import { buildDocumentValue, DOCUMENT_TYPE_OPTIONS, parseDocumentValue } from '../utils/document';
 import PaginationControls from '../components/PaginationControls';
 import CertificateGeneratorLauncher from '../components/certificates/CertificateGeneratorLauncher';
+import CertificateLibraryPage from './CertificateLibraryPage';
 import PaymentsPage from './PaymentsPage';
 import TransfersManager from './transfers/TransfersManager';
 
@@ -308,6 +309,7 @@ export default function ManagementPage() {
       periods: canReadPeriods,
       payments: canReadPayments,
       certificates: canReadPayments,
+      certificate_history: canReadPayments,
     }),
     [canReadCampuses, canReadCoursesModule, canReadPayments, canReadPeriods, canReadStudents, canReadTeachers],
   );
@@ -3759,11 +3761,20 @@ export default function ManagementPage() {
                 Configura primero los datos del certificado y luego abre el generador con toda la información precargada.
               </p>
             </div>
+            <button
+              type="button"
+              onClick={() => changeTab('certificate_history')}
+              className="rounded-xl border border-primary-200 bg-white px-4 py-2 text-sm font-semibold text-primary-800 transition hover:border-primary-300 hover:bg-primary-50"
+            >
+              Ver certificados emitidos
+            </button>
           </div>
 
           <CertificateGeneratorLauncher />
         </article>
       ) : null}
+
+      {activeTab === 'certificate_history' && canReadPayments ? <CertificateLibraryPage /> : null}
 
       {activeTab === 'courses' && canReadCoursesModule ? (
         <article className="card space-y-4">

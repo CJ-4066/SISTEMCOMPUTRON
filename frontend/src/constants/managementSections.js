@@ -6,6 +6,7 @@ import {
   CalendarRange,
   FileBadge,
   GraduationCap,
+  History,
   NotebookPen,
   Wallet,
 } from 'lucide-react';
@@ -62,8 +63,14 @@ export const MANAGEMENT_SECTION_ITEMS = [
   },
   {
     key: 'certificates',
-    label: 'Certificados',
+    label: 'Generar certificado',
     icon: FileBadge,
+    permissions: [PERMISSIONS.PAYMENTS_VIEW, PERMISSIONS.PAYMENTS_MANAGE],
+  },
+  {
+    key: 'certificate_history',
+    label: 'Certificados emitidos',
+    icon: History,
     permissions: [PERMISSIONS.PAYMENTS_VIEW, PERMISSIONS.PAYMENTS_MANAGE],
   },
 ];
