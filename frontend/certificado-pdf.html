@@ -115,6 +115,15 @@
         box-shadow: 0 0 0 3px rgba(119, 216, 196, 0.25);
       }
 
+      .field-grid input:disabled,
+      .field-grid select:disabled {
+        cursor: not-allowed;
+        border-color: var(--ui-primary-100);
+        background: var(--ui-primary-50);
+        color: var(--ui-primary-700);
+        opacity: 0.82;
+      }
+
       .short-row {
         display: grid;
         gap: 12px;
@@ -442,29 +451,47 @@
 
       .qr-verification {
         position: absolute;
-        bottom: 6.8%;
-        right: 7.3%;
-        width: clamp(64px, 6.5vw, 82px);
+        right: 3%;
+        bottom: 4%;
+        width: clamp(72px, 7vw, 94px);
         padding: clamp(4px, 0.45vw, 7px);
         border: 1px solid rgba(29, 54, 84, 0.28);
         border-radius: 5px;
         background: #ffffff;
         text-align: center;
-        visibility: hidden;
-        opacity: 0;
         z-index: 5;
       }
 
-      .qr-verification.show-qr {
-        visibility: visible;
-        opacity: 1;
+      .qr-placeholder {
+        display: grid;
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        place-items: center;
+        border: 1px dashed rgba(29, 54, 84, 0.35);
+        background:
+          linear-gradient(90deg, rgba(29, 54, 84, 0.06) 50%, transparent 50%) 0 0 / 8px 8px,
+          linear-gradient(rgba(29, 54, 84, 0.06) 50%, transparent 50%) 0 0 / 8px 8px,
+          #ffffff;
+        color: #1d3654;
+        font-family: "DM Sans", sans-serif;
+        font-size: clamp(12px, 0.85vw, 16px);
+        font-weight: 800;
+        letter-spacing: 0.08em;
       }
 
       .qr-code {
-        display: block;
+        display: none;
         width: 100%;
         aspect-ratio: 1 / 1;
         object-fit: contain;
+      }
+
+      .qr-verification.show-qr .qr-placeholder {
+        display: none;
+      }
+
+      .qr-verification.show-qr .qr-code {
+        display: block;
       }
 
       .qr-caption {
@@ -481,7 +508,7 @@
       .signatures {
         position: absolute;
         left: 8%;
-        right: 8%;
+        right: 15%;
         bottom: 6.5%;
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -734,6 +761,7 @@
         </form>
 
         <div class="actions">
+          <button class="btn-secondary" type="button" id="prepareQrButton">Generar QR verificable</button>
           <button class="btn-primary" type="button" id="printButton">Descargar PDF</button>
           <button class="btn-secondary" type="button" id="clearButton">Limpiar campos</button>
         </div>
@@ -776,8 +804,9 @@
           </div>
           <div class="code-strip" id="codeView">Codigo: CMP-2026-00125</div>
           <div class="qr-verification" id="qrVerification">
+            <div class="qr-placeholder" id="qrPlaceholder" aria-hidden="true">QR</div>
             <img class="qr-code" id="qrCodeView" alt="Código QR de verificación" />
-            <span class="qr-caption">Verificar certificado</span>
+            <span class="qr-caption" id="qrCaption">Generar QR</span>
           </div>
 
           <div class="signatures">
@@ -820,14 +849,18 @@
         const embedBackdrop = document.getElementById("embedBackdrop");
         const embedPrintButton = document.getElementById("embedPrintButton");
         const printButton = document.getElementById("printButton");
+        const prepareQrButton = document.getElementById("prepareQrButton");
+        const clearButton = document.getElementById("clearButton");
         const qrCodeView = document.getElementById("qrCodeView");
         const qrVerification = document.getElementById("qrVerification");
+        const qrCaption = document.getElementById("qrCaption");
 
         const state = {
           photoObjectUrl: null,
-          qrObjectUrl: null,
+          qrDataUrl: null,
           validationToken: queryParams.get("token") || null,
           exportingPdf: false,
+          preparingQr: false,
           draftCampusId: null,
           draftStudentId: null,
           draftEnrollmentId: null
@@ -981,17 +1014,27 @@
         const clearVerificationQr = () => {
           qrVerification.classList.remove("show-qr");
           qrCodeView.removeAttribute("src");
-          if (state.qrObjectUrl) {
-            URL.revokeObjectURL(state.qrObjectUrl);
-            state.qrObjectUrl = null;
-          }
+          state.qrDataUrl = null;
+          qrCaption.textContent = "Generar QR";
+          prepareQrButton.disabled = false;
+          prepareQrButton.textContent = "Generar QR verificable";
         };
+
+        const blobToDataUrl = (blob) =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.addEventListener("load", () => resolve(String(reader.result || "")), { once: true });
+            reader.addEventListener("error", () => reject(new Error("No se pudo preparar la imagen del QR.")), {
+              once: true
+            });
+            reader.readAsDataURL(blob);
+          });
 
         const loadVerificationQr = async (token) => {
           if (!token) {
             throw new Error("No se recibió el código único para generar el QR.");
           }
-          if (state.qrObjectUrl && qrCodeView.src) {
+          if (state.qrDataUrl && qrCodeView.src) {
             qrVerification.classList.add("show-qr");
             return;
           }
@@ -1007,11 +1050,30 @@
           }
 
           const blob = await response.blob();
+          const qrDataUrl = await blobToDataUrl(blob);
           clearVerificationQr();
-          state.qrObjectUrl = URL.createObjectURL(blob);
-          qrCodeView.src = state.qrObjectUrl;
+          state.qrDataUrl = qrDataUrl;
+          qrCodeView.src = qrDataUrl;
           qrVerification.classList.add("show-qr");
+          qrCaption.textContent = "Verificar certificado";
+          prepareQrButton.disabled = true;
+          prepareQrButton.textContent = "QR generado";
           await waitForImage(qrCodeView);
+        };
+
+        const setCertificateLocked = (locked) => {
+          form.querySelectorAll("input, select, textarea").forEach((field) => {
+            field.disabled = locked;
+          });
+          clearButton.disabled = skipLibraryRegistration && locked;
+        };
+
+        const prepareVerificationQr = async () => {
+          updatePreview();
+          const token = await registerCertificateInLibrary();
+          await loadVerificationQr(token);
+          setCertificateLocked(true);
+          return token;
         };
 
         const sanitizeFileName = (value) =>
@@ -1055,9 +1117,7 @@
 
           try {
             updatePreview();
-            
-            const token = await registerCertificateInLibrary();
-            await loadVerificationQr(token);
+            await prepareVerificationQr();
             
             await Promise.all([
               document.fonts?.ready || Promise.resolve(),
@@ -1353,6 +1413,7 @@
         };
 
         const clearForm = () => {
+          setCertificateLocked(false);
           form.reset();
           handlePhotoUpload(null);
           if (!skipLibraryRegistration) {
@@ -1380,6 +1441,28 @@
 
         printButton.addEventListener("click", () => {
           exportCertificatePdf();
+        });
+
+        prepareQrButton.addEventListener("click", async () => {
+          if (state.preparingQr || state.validationToken) return;
+
+          state.preparingQr = true;
+          prepareQrButton.disabled = true;
+          prepareQrButton.textContent = "Generando QR...";
+          try {
+            await prepareVerificationQr();
+          } catch (error) {
+            console.error("No se pudo preparar el QR del certificado:", error);
+            prepareQrButton.disabled = false;
+            prepareQrButton.textContent = "Generar QR verificable";
+            window.alert(
+              error instanceof Error
+                ? error.message
+                : "No se pudo generar el QR verificable. Intenta nuevamente."
+            );
+          } finally {
+            state.preparingQr = false;
+          }
         });
 
         embedPrintButton?.addEventListener("click", () => {
@@ -1414,9 +1497,11 @@
         applyDraftPayload();
         updatePreview();
         if (state.validationToken) {
-          loadVerificationQr(state.validationToken).catch((error) => {
-            console.warn("No se pudo mostrar el QR guardado", error);
-          });
+          loadVerificationQr(state.validationToken)
+            .then(() => setCertificateLocked(true))
+            .catch((error) => {
+              console.warn("No se pudo mostrar el QR guardado", error);
+            });
         }
         triggerAutoDownload();
       })();
